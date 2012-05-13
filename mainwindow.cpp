@@ -102,13 +102,16 @@ void MainWindow::on_selectReadFileButton_clicked()
 
 void MainWindow::on_readFromSIMMButton_clicked()
 {
+    resetAndShowStatusPage();
     p->ReadSIMMToFile(ui->chosenReadFile->text());
     qDebug() << "Reading from SIMM...";
 }
 
 void MainWindow::on_writeToSIMMButton_clicked()
 {
+    resetAndShowStatusPage();
     p->WriteFileToSIMM(ui->chosenWriteFile->text());
+    qDebug() << "Writing to SIMM...";
 }
 
 void MainWindow::on_chosenWriteFile_textEdited(const QString &newText)
@@ -130,22 +133,30 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
 {
     switch (newStatus)
     {
+    case WriteErasing:
+        ui->statusLabel->setText("Erasing SIMM...");
+        break;
     case WriteComplete:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::information(this, "Write complete", "The write operation finished.");
         break;
     case WriteError:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write error", "An error occurred writing to the SIMM.");
         break;
     case WriteCancelled:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write cancelled", "The write operation was cancelled.");
         break;
     case WriteEraseComplete:
-        // No message needed for this
+        ui->statusLabel->setText("Writing SIMM...");
         break;
     case WriteEraseFailed:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write error", "An error occurred erasing the SIMM.");
         break;
     case WriteTimedOut:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write timed out", "The write operation timed out.");
         break;
     }
@@ -165,6 +176,7 @@ void MainWindow::programmerWriteCompletionLengthChanged(uint32_t len)
 
 void MainWindow::on_electricalTestButton_clicked()
 {
+    resetAndShowStatusPage();
     electricalTestString = "";
     p->RunElectricalTest();
 }
@@ -174,18 +186,23 @@ void MainWindow::programmerElectricalTestStatusChanged(ElectricalTestStatus newS
     switch (newStatus)
     {
     case ElectricalTestStarted:
+        ui->statusLabel->setText("Running electrical test...");
         qDebug() << "Electrical test started";
         break;
     case ElectricalTestPassed:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::information(this, "Test passed", "The electrical test passed successfully.");
         break;
     case ElectricalTestFailed:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Test failed", "The electrical test failed:\n\n" + electricalTestString);
         break;
     case ElectricalTestTimedOut:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Test timed out", "The electrical test operation timed out.");
         break;
     case ElectricalTestCouldntStart:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Communication error", "Unable to communicate with programmer board.");
         break;
     }
@@ -208,16 +225,23 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
 {
     switch (newStatus)
     {
+    case ReadStarting:
+        ui->statusLabel->setText("Reading SIMM contents...");
+        break;
     case ReadComplete:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::information(this, "Read complete", "The read operation finished.");
         break;
     case ReadError:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Read error", "An error occurred reading from the SIMM.");
         break;
     case ReadCancelled:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Read cancelled", "The read operation was cancelled.");
         break;
     case ReadTimedOut:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Read timed out", "The read operation timed out.");
         break;
     }
@@ -237,8 +261,12 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
 {
     switch (newStatus)
     {
+    case IdentificationStarting:
+        ui->statusLabel->setText("Identifying chips...");
+        break;
     case IdentificationComplete:
     {
+        ui->pages->setCurrentWidget(ui->controlPage);
         QString identifyString = "The chips identified themselves as:";
         for (int x = 0; x < 4; x++)
         {
@@ -254,9 +282,11 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
         break;
     }
     case IdentificationError:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Identification error", "An error occurred identifying the chips on the SIMM.");
         break;
     case IdentificationTimedOut:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Identification timed out", "The identification operation timed out.");
         break;
     }
@@ -266,16 +296,23 @@ void MainWindow::programmerFirmwareFlashStatusChanged(FirmwareFlashStatus newSta
 {
     switch (newStatus)
     {
+    case FirmwareFlashStarting:
+        ui->statusLabel->setText("Flashing new firmware...");
+        break;
     case FirmwareFlashComplete:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::information(this, "Firmware update complete", "The firmware update operation finished.");
         break;
     case FirmwareFlashError:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Firmware update error", "An error occurred writing firmware to the device.");
         break;
     case FirmwareFlashCancelled:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Firmware update cancelled", "The firmware update was cancelled.");
         break;
     case FirmwareFlashTimedOut:
+        ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Firmware update timed out", "The firmware update operation timed out.");
         break;
     }
@@ -320,6 +357,7 @@ void MainWindow::on_actionUpdate_firmware_triggered()
     QString filename = QFileDialog::getOpenFileName(this, "Select a firmware image:");
     if (!filename.isNull())
     {
+        resetAndShowStatusPage();
         p->FlashFirmware(filename);
         qDebug() << "Updating firmware...";
     }
@@ -327,10 +365,11 @@ void MainWindow::on_actionUpdate_firmware_triggered()
 
 void MainWindow::on_identifyButton_clicked()
 {
+    resetAndShowStatusPage();
     p->IdentifySIMMChips();
 }
 
-void MainWindow::portDiscovered(const QextPortInfo & info)
+void MainWindow::portDiscovered(const QextPortInfo &info)
 {
     qDebug() << info.portName << "discovered";
 
@@ -351,7 +390,7 @@ void MainWindow::portDiscovered(const QextPortInfo & info)
     }
 }
 
-void MainWindow::portRemoved(const QextPortInfo & info)
+void MainWindow::portRemoved(const QextPortInfo &info)
 {
     qDebug() << info.portName << "removed";
 
@@ -362,4 +401,11 @@ void MainWindow::portRemoved(const QextPortInfo & info)
             ui->portList->removeItem(x);
         }
     }
+}
+
+void MainWindow::resetAndShowStatusPage()
+{
+    ui->progressBar->setValue(0);
+    ui->statusLabel->setText("Communicating with programmer...");
+    ui->pages->setCurrentWidget(ui->statusPage);
 }

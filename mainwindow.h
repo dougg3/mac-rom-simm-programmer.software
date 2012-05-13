@@ -52,14 +52,16 @@ private slots:
 
     void on_identifyButton_clicked();
 
-    void portDiscovered(const QextPortInfo & info);
-    void portRemoved(const QextPortInfo & info);
+    void portDiscovered(const QextPortInfo &info);
+    void portRemoved(const QextPortInfo &info);
 
 private:
     Ui::MainWindow *ui;
     bool writeFileValid;
     bool readFileValid;
     QString electricalTestString;
+
+    void resetAndShowStatusPage();
 };
 
 #endif // MAINWINDOW_H

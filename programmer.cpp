@@ -373,6 +373,7 @@ void Programmer::handleChar(uint8_t c)
 
     // READ SIMM STATE HANDLERS
     case ReadSIMMWaitingStartReply:
+        emit readStatusChanged(ReadStarting);
         curState = ReadSIMMWaitingData;
         readChunkLenRemaining = READ_CHUNK_SIZE;
         break;
@@ -436,6 +437,7 @@ void Programmer::handleChar(uint8_t c)
             //       Ensure we're in the programmer?
             //       Then do the command correctly
             qDebug() << "We're in the bootloader, so sending an \"enter programmer\" request.";
+            emit startStatusChanged(ProgrammerInitializing);
             sendByte(EnterProgrammer);
             serialPort->close();
             {
@@ -449,14 +451,27 @@ void Programmer::handleChar(uint8_t c)
             serialPort->open(QextSerialPort::ReadWrite);
             curState = nextState;
             sendByte(nextSendByte);
+            // Special case: Send out notification we are starting an erase command.
+            // I don't have any hooks into the process between now and the erase reply.
+            if (nextSendByte == EraseChips)
+            {
+                emit writeStatusChanged(WriteErasing);
+            }
             break;
         case BootloaderStateInProgrammer:
             // Good to go...
             // So change to the next state and send out the next command
             // to begin whatever sequence of events we expected.
             qDebug() << "Already in programmer. Good! Do the command now...";
+            emit startStatusChanged(ProgrammerInitialized);
             curState = nextState;
             sendByte(nextSendByte);
+            // Special case: Send out notification we are starting an erase command.
+            // I don't have any hooks into the process between now and the erase reply.
+            if (nextSendByte == EraseChips)
+            {
+                emit writeStatusChanged(WriteErasing);
+            }
             break;
             // TODO: Otherwise, raise an error?
         }
@@ -487,6 +502,7 @@ void Programmer::handleChar(uint8_t c)
             //       Ensure we're in the bootloader?
             //       Then do the command correctly
             qDebug() << "We're in the programmer, so sending an \"enter bootloader\" request.";
+            emit startStatusChanged(ProgrammerInitializing);
             sendByte(EnterBootloader);
             serialPort->close();
             {
@@ -506,6 +522,7 @@ void Programmer::handleChar(uint8_t c)
             // So change to the next state and send out the next command
             // to begin whatever sequence of events we expected.
             qDebug() << "Already in bootloader. Good! Do the command now...";
+            emit startStatusChanged(ProgrammerInitialized);
             curState = nextState;
             sendByte(nextSendByte);
             break;
@@ -518,6 +535,7 @@ void Programmer::handleChar(uint8_t c)
         if (c == CommandReplyOK)
         {
             // Good to go, now waiting for identification data
+            emit identificationStatusChanged(IdentificationStarting);
             curState = IdentificationWaitingData;
             identificationCounter = 0;
         }
@@ -559,6 +577,7 @@ void Programmer::handleChar(uint8_t c)
     case BootloaderEraseProgramAwaitingStartOKReply:
         if (c == CommandReplyOK)
         {
+            emit firmwareFlashStatusChanged(FirmwareFlashStarting);
             sendByte(ComputerBootloaderWriteMore);
             curState = BootloaderEraseProgramWaitingWriteMoreReply;
         }

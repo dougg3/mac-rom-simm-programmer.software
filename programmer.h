@@ -5,8 +5,15 @@
 #include <QFile>
 #include <qextserialport.h>
 
+typedef enum StartStatus
+{
+    ProgrammerInitializing,
+    ProgrammerInitialized
+} StartStatus;
+
 typedef enum ReadStatus
 {
+    ReadStarting,
     ReadComplete,
     ReadError,
     ReadCancelled,
@@ -15,6 +22,7 @@ typedef enum ReadStatus
 
 typedef enum WriteStatus
 {
+    WriteErasing,
     WriteComplete,
     WriteError,
     WriteCancelled,
@@ -34,6 +42,7 @@ typedef enum ElectricalTestStatus
 
 typedef enum IdentificationStatus
 {
+    IdentificationStarting,
     IdentificationComplete,
     IdentificationError,
     IdentificationTimedOut
@@ -41,6 +50,7 @@ typedef enum IdentificationStatus
 
 typedef enum FirmwareFlashStatus
 {
+    FirmwareFlashStarting,
     FirmwareFlashComplete,
     FirmwareFlashError,
     FirmwareFlashCancelled,
@@ -72,6 +82,8 @@ public:
     void GetChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device);
     void FlashFirmware(QString filename);
 signals:
+    void startStatusChanged(StartStatus status);
+
     void readStatusChanged(ReadStatus status);
     void readTotalLengthChanged(uint32_t total);
     void readCompletionLengthChanged(uint32_t total);
