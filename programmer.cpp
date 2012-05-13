@@ -25,6 +25,10 @@ typedef enum ProgrammerCommandState
     BootloaderStateAwaitingReply,
     BootloaderStateAwaitingOKReplyToBootloader,
     BootloaderStateAwaitingReplyToBootloader,
+    BootloaderStateAwaitingUnplug,
+    BootloaderStateAwaitingPlug,
+    BootloaderStateAwaitingUnplugToBootloader,
+    BootloaderStateAwaitingPlugToBootloader,
 
     IdentificationAwaitingOKReply,
     IdentificationWaitingData,
@@ -35,6 +39,12 @@ typedef enum ProgrammerCommandState
     BootloaderEraseProgramWaitingWriteMoreReply,
     BootloaderEraseProgramWaitingWriteReply
 } ProgrammerCommandState;
+
+typedef enum ProgrammerBoardFoundState
+{
+    ProgrammerBoardNotFound,
+    ProgrammerBoardFound
+} ProgrammerBoardFoundState;
 
 typedef enum ProgrammerCommand
 {
@@ -118,8 +128,8 @@ typedef enum ComputerBootloaderEraseWriteRequest
     ComputerBootloaderCancel
 } ComputerBootloaderEraseWriteRequest;
 
-
-
+#define PROGRAMMER_USB_VENDOR_ID            0x03EB
+#define PROGRAMMER_USB_DEVICE_ID            0x204B
 
 
 #define WRITE_CHUNK_SIZE    1024
@@ -133,23 +143,23 @@ static ProgrammerCommandState curState = WaitingForNextCommand;
 static ProgrammerCommandState nextState = WaitingForNextCommand;
 static uint8_t nextSendByte = 0;
 
+static ProgrammerBoardFoundState foundState = ProgrammerBoardNotFound;
+static QString programmerBoardPortName;
+
 Programmer::Programmer(QObject *parent) :
     QObject(parent)
 {
-    serialPort = new QextSerialPort("\\\\.\\COM13", QextSerialPort::EventDriven);
+    serialPort = new QextSerialPort(QextSerialPort::EventDriven);
     connect(serialPort, SIGNAL(readyRead()), SLOT(dataReady()));
 }
 
 Programmer::~Programmer()
 {
-    if (serialPort->isOpen())
-    {
-        serialPort->close();
-    }
+    closePort();
     delete serialPort;
 }
 
-void Programmer::ReadSIMMToFile(QString filename)
+void Programmer::readSIMMToFile(QString filename)
 {
     readFile = new QFile(filename);
     readFile->open(QFile::WriteOnly);
@@ -161,7 +171,7 @@ void Programmer::ReadSIMMToFile(QString filename)
     startProgrammerCommand(ReadChips, ReadSIMMWaitingStartReply);
 }
 
-void Programmer::WriteFileToSIMM(QString filename)
+void Programmer::writeFileToSIMM(QString filename)
 {
     writeFile = new QFile(filename);
     if (!writeFile->open(QFile::ReadOnly))
@@ -221,7 +231,7 @@ void Programmer::handleChar(uint8_t c)
             writeFile->close();
             curState = WaitingForNextCommand;
             emit writeStatusChanged(WriteEraseFailed);
-            serialPort->close();
+            closePort();
             break;
         }
         break;
@@ -249,7 +259,7 @@ void Programmer::handleChar(uint8_t c)
             writeFile->close();
             curState = WaitingForNextCommand;
             emit writeStatusChanged(WriteError);
-            serialPort->close();
+            closePort();
             break;
         }
 
@@ -296,7 +306,7 @@ void Programmer::handleChar(uint8_t c)
             writeFile->close();
             curState = WaitingForNextCommand;
             emit writeStatusChanged(WriteError);
-            serialPort->close();
+            closePort();
             break;
         }
         break;
@@ -309,7 +319,7 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             qDebug() << "Write success at end";
             emit writeStatusChanged(WriteComplete);
-            serialPort->close();
+            closePort();
             break;
         case ProgrammerWriteError:
         default:
@@ -317,7 +327,7 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             writeFile->close();
             emit writeStatusChanged(WriteError);
-            serialPort->close();
+            closePort();
             break;
         }
 
@@ -338,7 +348,7 @@ void Programmer::handleChar(uint8_t c)
         default:
             curState = WaitingForNextCommand;
             emit electricalTestStatusChanged(ElectricalTestCouldntStart);
-            serialPort->close();
+            closePort();
         }
         break;
     case ElectricalTestWaitingNextStatus:
@@ -354,7 +364,7 @@ void Programmer::handleChar(uint8_t c)
                 emit electricalTestStatusChanged(ElectricalTestPassed);
             }
             curState = WaitingForNextCommand;
-            serialPort->close();
+            closePort();
             break;
         case ProgrammerElectricalTestFail:
             electricalTestErrorCounter++;
@@ -393,13 +403,13 @@ void Programmer::handleChar(uint8_t c)
         {
         case ProgrammerReadFinished:
             curState = WaitingForNextCommand;
-            serialPort->close();
+            closePort();
             readFile->close();
             emit readStatusChanged(ReadComplete);
             break;
         case ProgrammerReadConfirmCancel:
             curState = WaitingForNextCommand;
-            serialPort->close();
+            closePort();
             readFile->close();
             emit readStatusChanged(ReadCancelled);
             break;
@@ -439,24 +449,10 @@ void Programmer::handleChar(uint8_t c)
             qDebug() << "We're in the bootloader, so sending an \"enter programmer\" request.";
             emit startStatusChanged(ProgrammerInitializing);
             sendByte(EnterProgrammer);
-            serialPort->close();
-            {
-                QMutex mutex;
-                mutex.lock();
+            closePort();
 
-                QWaitCondition waitCondition;
-                waitCondition.wait(&mutex, 5000);
-                mutex.unlock();
-            }
-            serialPort->open(QextSerialPort::ReadWrite);
-            curState = nextState;
-            sendByte(nextSendByte);
-            // Special case: Send out notification we are starting an erase command.
-            // I don't have any hooks into the process between now and the erase reply.
-            if (nextSendByte == EraseChips)
-            {
-                emit writeStatusChanged(WriteErasing);
-            }
+            // Now wait for it to reconnect
+            curState = BootloaderStateAwaitingUnplug;
             break;
         case BootloaderStateInProgrammer:
             // Good to go...
@@ -504,18 +500,10 @@ void Programmer::handleChar(uint8_t c)
             qDebug() << "We're in the programmer, so sending an \"enter bootloader\" request.";
             emit startStatusChanged(ProgrammerInitializing);
             sendByte(EnterBootloader);
-            serialPort->close();
-            {
-                QMutex mutex;
-                mutex.lock();
+            closePort();
 
-                QWaitCondition waitCondition;
-                waitCondition.wait(&mutex, 5000);
-                mutex.unlock();
-            }
-            serialPort->open(QextSerialPort::ReadWrite);
-            curState = nextState;
-            sendByte(nextSendByte);
+            // Now wait for it to reconnect
+            curState = BootloaderStateAwaitingUnplugToBootloader;
             break;
         case BootloaderStateInBootloader:
             // Good to go...
@@ -585,7 +573,7 @@ void Programmer::handleChar(uint8_t c)
         {
             emit firmwareFlashStatusChanged(FirmwareFlashError);
             curState = WaitingForNextCommand;
-            serialPort->close();
+            closePort();
             firmwareFile->close();
         }
         break;
@@ -594,14 +582,14 @@ void Programmer::handleChar(uint8_t c)
         {
             emit firmwareFlashStatusChanged(FirmwareFlashComplete);
             curState = WaitingForNextCommand;
-            serialPort->close();
+            closePort();
             firmwareFile->close();
         }
         else
         {
             emit firmwareFlashStatusChanged(FirmwareFlashError);
             curState = WaitingForNextCommand;
-            serialPort->close();
+            closePort();
             firmwareFile->close();
         }
         break;
@@ -640,7 +628,7 @@ void Programmer::handleChar(uint8_t c)
         {
             emit firmwareFlashStatusChanged(FirmwareFlashError);
             curState = WaitingForNextCommand;
-            serialPort->close();
+            closePort();
             firmwareFile->close();
         }
         break;
@@ -663,14 +651,21 @@ void Programmer::handleChar(uint8_t c)
         {
             emit firmwareFlashStatusChanged(FirmwareFlashError);
             curState = WaitingForNextCommand;
-            serialPort->close();
+            closePort();
             firmwareFile->close();
         }
+        break;
+
+    // UNUSED STATE HANDLERS (They are handled elsewhere)
+    case BootloaderStateAwaitingPlug:
+    case BootloaderStateAwaitingUnplug:
+    case BootloaderStateAwaitingPlugToBootloader:
+    case BootloaderStateAwaitingUnplugToBootloader:
         break;
     }
 }
 
-void Programmer::RunElectricalTest()
+void Programmer::runElectricalTest()
 {
     startProgrammerCommand(DoElectricalTest, ElectricalTestWaitingStartReply);
 }
@@ -727,12 +722,12 @@ QString Programmer::electricalTestPinName(uint8_t index)
     }
 }
 
-void Programmer::IdentifySIMMChips()
+void Programmer::identifySIMMChips()
 {
     startProgrammerCommand(IdentifyChips, IdentificationAwaitingOKReply);
 }
 
-void Programmer::GetChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device)
+void Programmer::getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device)
 {
     if ((chipIndex >= 0) && (chipIndex < 4))
     {
@@ -746,7 +741,7 @@ void Programmer::GetChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *
     }
 }
 
-void Programmer::FlashFirmware(QString filename)
+void Programmer::flashFirmware(QString filename)
 {
     firmwareFile = new QFile(filename);
     if (!firmwareFile->open(QFile::ReadOnly))
@@ -775,7 +770,7 @@ void Programmer::startProgrammerCommand(uint8_t commandByte, uint32_t newState)
     nextSendByte = commandByte;
 
     curState = BootloaderStateAwaitingOKReply;
-    serialPort->open(QextSerialPort::ReadWrite);
+    openPort();
     sendByte(GetBootloaderState);
 }
 
@@ -790,6 +785,107 @@ void Programmer::startBootloaderCommand(uint8_t commandByte, uint32_t newState)
     nextSendByte = commandByte;
 
     curState = BootloaderStateAwaitingOKReplyToBootloader;
-    serialPort->open(QextSerialPort::ReadWrite);
+    openPort();
     sendByte(GetBootloaderState);
+}
+
+
+void Programmer::portDiscovered(const QextPortInfo &info)
+{
+    if ((foundState == ProgrammerBoardNotFound) &&
+        (info.vendorID == PROGRAMMER_USB_VENDOR_ID) &&
+        (info.productID == PROGRAMMER_USB_DEVICE_ID))
+    {
+#ifdef Q_WS_WIN
+        programmerBoardPortName = "\\\\.\\" + info.portName;
+#else
+        programmerBoardPortName = info.portName;
+#endif
+        foundState = ProgrammerBoardFound;
+
+        closePort();
+        serialPort->setPortName(programmerBoardPortName);
+
+        // Don't show the "control" screen if we intentionally
+        // reconnected the USB port because we are changing from bootloader
+        // to programmer mode or vice-versa.
+        if (curState == BootloaderStateAwaitingPlug)
+        {
+            openPort();
+            curState = nextState;
+            sendByte(nextSendByte);
+            // Special case: Send out notification we are starting an erase command.
+            // I don't have any hooks into the process between now and the erase reply.
+            if (nextSendByte == EraseChips)
+            {
+                emit writeStatusChanged(WriteErasing);
+            }
+        }
+        else if (curState == BootloaderStateAwaitingPlugToBootloader)
+        {
+            openPort();
+            curState = nextState;
+            sendByte(nextSendByte);
+        }
+        else
+        {
+            emit programmerBoardConnected();
+        }
+    }
+}
+
+void Programmer::portRemoved(const QextPortInfo &info)
+{
+    if ((info.vendorID == PROGRAMMER_USB_VENDOR_ID) &&
+        (info.productID == PROGRAMMER_USB_DEVICE_ID))
+    {
+        programmerBoardPortName = "";
+        foundState = ProgrammerBoardNotFound;
+
+        // Don't show the "no programmer connected" screen if we intentionally
+        // disconnected the USB port because we are changing from bootloader
+        // to programmer mode or vice-versa.
+        if (curState == BootloaderStateAwaitingUnplug)
+        {
+            curState = BootloaderStateAwaitingPlug;
+        }
+        else if (curState == BootloaderStateAwaitingUnplugToBootloader)
+        {
+            curState = BootloaderStateAwaitingPlugToBootloader;
+        }
+        else
+        {
+            closePort();
+
+            if (curState != WaitingForNextCommand)
+            {
+                // This means they unplugged while we were in the middle
+                // of an operation. Reset state, and let them know.
+                curState = WaitingForNextCommand;
+                emit programmerBoardDisconnectedDuringOperation();
+            }
+            else
+            {
+                emit programmerBoardDisconnected();
+            }
+        }
+    }
+}
+
+void Programmer::startCheckingPorts()
+{
+    QextSerialEnumerator *p = new QextSerialEnumerator();
+    connect(p, SIGNAL(deviceDiscovered(QextPortInfo)), SLOT(portDiscovered(QextPortInfo)));
+    connect(p, SIGNAL(deviceRemoved(QextPortInfo)), SLOT(portRemoved(QextPortInfo)));
+    p->setUpNotifications();
+}
+
+void Programmer::openPort()
+{
+    serialPort->open(QextSerialPort::ReadWrite);
+}
+
+void Programmer::closePort()
+{
+    serialPort->close();
 }

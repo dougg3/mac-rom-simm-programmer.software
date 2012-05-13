@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QFile>
 #include <qextserialport.h>
+#include <qextserialenumerator.h>
 
 typedef enum StartStatus
 {
@@ -74,13 +75,14 @@ class Programmer : public QObject
 public:
     explicit Programmer(QObject *parent = 0);
     virtual ~Programmer();
-    void ReadSIMMToFile(QString filename);
-    void WriteFileToSIMM(QString filename);
-    void RunElectricalTest();
+    void readSIMMToFile(QString filename);
+    void writeFileToSIMM(QString filename);
+    void runElectricalTest();
     QString electricalTestPinName(uint8_t index);
-    void IdentifySIMMChips();
-    void GetChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device);
-    void FlashFirmware(QString filename);
+    void identifySIMMChips();
+    void getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device);
+    void flashFirmware(QString filename);
+    void startCheckingPorts();
 signals:
     void startStatusChanged(StartStatus status);
 
@@ -100,6 +102,10 @@ signals:
     void firmwareFlashStatusChanged(FirmwareFlashStatus status);
     void firmwareFlashTotalLengthChanged(uint32_t total);
     void firmwareFlashCompletionLengthChanged(uint32_t total);
+
+    void programmerBoardConnected();
+    void programmerBoardDisconnected();
+    void programmerBoardDisconnectedDuringOperation();
 public slots:
 
 private:
@@ -127,11 +133,17 @@ private:
     uint32_t firmwareLenRemaining;
     uint32_t firmwareLenWritten;
 
+    void openPort();
+    void closePort();
+
     void startProgrammerCommand(uint8_t commandByte, uint32_t newState);
     void startBootloaderCommand(uint8_t commandByte, uint32_t newState);
 
 private slots:
     void dataReady();
+
+    void portDiscovered(const QextPortInfo &info);
+    void portRemoved(const QextPortInfo &info);
 };
 
 #endif // PROGRAMMER_H

@@ -12,6 +12,8 @@ MainWindow::MainWindow(QWidget *parent) :
     ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    ui->pages->setCurrentWidget(ui->notConnectedPage);
+    ui->actionUpdate_firmware->setEnabled(false);
     p = new Programmer();
     ui->chosenWriteFile->setText("");
     ui->chosenReadFile->setText("");
@@ -36,6 +38,10 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(p, SIGNAL(firmwareFlashStatusChanged(FirmwareFlashStatus)), SLOT(programmerFirmwareFlashStatusChanged(FirmwareFlashStatus)));
     connect(p, SIGNAL(firmwareFlashTotalLengthChanged(uint32_t)), SLOT(programmerFirmwareFlashTotalLengthChanged(uint32_t)));
     connect(p, SIGNAL(firmwareFlashCompletionLengthChanged(uint32_t)), SLOT(programmerFirmwareFlashCompletionLengthChanged(uint32_t)));
+    connect(p, SIGNAL(programmerBoardConnected()), SLOT(programmerBoardConnected()));
+    connect(p, SIGNAL(programmerBoardDisconnected()), SLOT(programmerBoardDisconnected()));
+    connect(p, SIGNAL(programmerBoardDisconnectedDuringOperation()), SLOT(programmerBoardDisconnectedDuringOperation()));
+    p->startCheckingPorts();
 
     /*QList<QextPortInfo> l = QextSerialEnumerator::getPorts();
     foreach (QextPortInfo p, l)
@@ -65,11 +71,6 @@ MainWindow::MainWindow(QWidget *parent) :
             }
         }
     }*/
-
-    QextSerialEnumerator *p = new QextSerialEnumerator();
-    connect(p, SIGNAL(deviceDiscovered(QextPortInfo)), SLOT(portDiscovered(QextPortInfo)));
-    connect(p, SIGNAL(deviceRemoved(QextPortInfo)), SLOT(portRemoved(QextPortInfo)));
-    p->setUpNotifications();
 }
 
 MainWindow::~MainWindow()
@@ -103,14 +104,14 @@ void MainWindow::on_selectReadFileButton_clicked()
 void MainWindow::on_readFromSIMMButton_clicked()
 {
     resetAndShowStatusPage();
-    p->ReadSIMMToFile(ui->chosenReadFile->text());
+    p->readSIMMToFile(ui->chosenReadFile->text());
     qDebug() << "Reading from SIMM...";
 }
 
 void MainWindow::on_writeToSIMMButton_clicked()
 {
     resetAndShowStatusPage();
-    p->WriteFileToSIMM(ui->chosenWriteFile->text());
+    p->writeFileToSIMM(ui->chosenWriteFile->text());
     qDebug() << "Writing to SIMM...";
 }
 
@@ -134,7 +135,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
     switch (newStatus)
     {
     case WriteErasing:
-        ui->statusLabel->setText("Erasing SIMM...");
+        ui->statusLabel->setText("Erasing SIMM (this may take a few seconds)...");
         break;
     case WriteComplete:
         ui->pages->setCurrentWidget(ui->controlPage);
@@ -178,7 +179,7 @@ void MainWindow::on_electricalTestButton_clicked()
 {
     resetAndShowStatusPage();
     electricalTestString = "";
-    p->RunElectricalTest();
+    p->runElectricalTest();
 }
 
 void MainWindow::programmerElectricalTestStatusChanged(ElectricalTestStatus newStatus)
@@ -186,7 +187,7 @@ void MainWindow::programmerElectricalTestStatusChanged(ElectricalTestStatus newS
     switch (newStatus)
     {
     case ElectricalTestStarted:
-        ui->statusLabel->setText("Running electrical test...");
+        ui->statusLabel->setText("Running electrical test (this may take a few seconds)...");
         qDebug() << "Electrical test started";
         break;
     case ElectricalTestPassed:
@@ -273,7 +274,7 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
             QString thisString;
             uint8_t manufacturer = 0;
             uint8_t device = 0;
-            p->GetChipIdentity(x, &manufacturer, &device);
+            p->getChipIdentity(x, &manufacturer, &device);
             thisString.sprintf("\nIC%d: Manufacturer 0x%02X, Device 0x%02X", (x + 1), manufacturer, device);
             identifyString.append(thisString);
         }
@@ -328,29 +329,6 @@ void MainWindow::programmerFirmwareFlashCompletionLengthChanged(uint32_t len)
     ui->progressBar->setValue((int)len);
 }
 
-void MainWindow::startOperation_updateButtons()
-{
-    ui->writeToSIMMButton->setEnabled(false);
-    ui->readFromSIMMButton->setEnabled(false);
-    ui->identifyButton->setEnabled(false);
-    ui->electricalTestButton->setEnabled(false);
-    ui->progressBar->setValue(0);
-    ui->progressBar->setEnabled(true);
-    ui->cancelButton->setEnabled(true);
-}
-
-void MainWindow::endOperation_updateButtons()
-{
-    ui->writeToSIMMButton->setEnabled(writeFileValid);
-    ui->readFromSIMMButton->setEnabled(readFileValid);
-
-    ui->identifyButton->setEnabled(true);
-    ui->electricalTestButton->setEnabled(true);
-    ui->progressBar->setValue(0);
-    ui->progressBar->setEnabled(false);
-    ui->cancelButton->setEnabled(false);
-}
-
 
 void MainWindow::on_actionUpdate_firmware_triggered()
 {
@@ -358,7 +336,7 @@ void MainWindow::on_actionUpdate_firmware_triggered()
     if (!filename.isNull())
     {
         resetAndShowStatusPage();
-        p->FlashFirmware(filename);
+        p->flashFirmware(filename);
         qDebug() << "Updating firmware...";
     }
 }
@@ -366,46 +344,31 @@ void MainWindow::on_actionUpdate_firmware_triggered()
 void MainWindow::on_identifyButton_clicked()
 {
     resetAndShowStatusPage();
-    p->IdentifySIMMChips();
+    p->identifySIMMChips();
 }
 
-void MainWindow::portDiscovered(const QextPortInfo &info)
+void MainWindow::programmerBoardConnected()
 {
-    qDebug() << info.portName << "discovered";
-
-#ifdef Q_WS_WIN
-    if (info.portName.startsWith("COM"))
-#endif
-    {
-        // TODO: Do checking for valid USB ID?
-
-        if ((info.vendorID == 0x03EB) && (info.productID == 0x204B))
-        {
-            ui->portList->addItem(QString("%1 (Programmer)").arg(info.portName), QVariant(info.portName));
-        }
-        else
-        {
-            ui->portList->addItem(info.portName, QVariant(info.portName));
-        }
-    }
+    ui->pages->setCurrentWidget(ui->controlPage);
+    ui->actionUpdate_firmware->setEnabled(true);
 }
 
-void MainWindow::portRemoved(const QextPortInfo &info)
+void MainWindow::programmerBoardDisconnected()
 {
-    qDebug() << info.portName << "removed";
+    ui->pages->setCurrentWidget(ui->notConnectedPage);
+    ui->actionUpdate_firmware->setEnabled(false);
+}
 
-    for (int x = ui->portList->count() - 1; x >= 0; x--)
-    {
-        if (ui->portList->itemData(x) == info.portName)
-        {
-            ui->portList->removeItem(x);
-        }
-    }
+void MainWindow::programmerBoardDisconnectedDuringOperation()
+{
+    ui->pages->setCurrentWidget(ui->notConnectedPage);
+    ui->actionUpdate_firmware->setEnabled(false);
+    QMessageBox::warning(this, "Programmer lost connection", "Lost contact with the programmer board. Unplug it, plug it back in, and try again.");
 }
 
 void MainWindow::resetAndShowStatusPage()
 {
     ui->progressBar->setValue(0);
-    ui->statusLabel->setText("Communicating with programmer...");
+    ui->statusLabel->setText("Communicating with programmer (this may take a few seconds)...");
     ui->pages->setCurrentWidget(ui->statusPage);
 }

@@ -2,7 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <qextserialenumerator.h>
+//#include <qextserialenumerator.h>
 #include "programmer.h"
 
 namespace Ui {
@@ -45,15 +45,14 @@ private slots:
 
     void on_electricalTestButton_clicked();
 
-    void startOperation_updateButtons();
-    void endOperation_updateButtons();
-
     void on_actionUpdate_firmware_triggered();
 
     void on_identifyButton_clicked();
 
-    void portDiscovered(const QextPortInfo &info);
-    void portRemoved(const QextPortInfo &info);
+    // Handlers for when the programmer board has been connected or disconnected
+    void programmerBoardConnected();
+    void programmerBoardDisconnected();
+    void programmerBoardDisconnectedDuringOperation();
 
 private:
     Ui::MainWindow *ui;

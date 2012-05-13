@@ -12,11 +12,9 @@ TEMPLATE = app
 
 SOURCES += main.cpp\
         mainwindow.cpp \
-    usbprogrammerfinder_win.cpp \
     programmer.cpp
 
 HEADERS  += mainwindow.h \
-    usbprogrammerfinder.h \
     programmer.h
 
 FORMS    += mainwindow.ui
