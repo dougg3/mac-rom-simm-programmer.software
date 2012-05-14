@@ -54,6 +54,8 @@ private slots:
     void programmerBoardDisconnected();
     void programmerBoardDisconnectedDuringOperation();
 
+    void on_simmCapacityBox_currentIndexChanged(int index);
+
 private:
     Ui::MainWindow *ui;
     bool writeFileValid;

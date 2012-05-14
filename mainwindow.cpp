@@ -11,10 +11,16 @@ MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow)
 {
+    p = new Programmer();
     ui->setupUi(this);
     ui->pages->setCurrentWidget(ui->notConnectedPage);
     ui->actionUpdate_firmware->setEnabled(false);
-    p = new Programmer();
+
+    // Fill in the list of SIMM chip capacities (should support chips ranging from 128KB to 512KB in size (= 1, 2, or 4 Mb)
+    ui->simmCapacityBox->addItem("128 KB (1 Mb) per chip * 4 chips = 512 KB", QVariant(512 * 1024));
+    ui->simmCapacityBox->addItem("256 KB (2 Mb) per chip * 4 chips = 1 MB", QVariant(1 * 1024 * 1024));
+    ui->simmCapacityBox->addItem("512 KB (4 Mb) per chip * 4 chips = 2 MB", QVariant(2 * 1024 * 1024));
+
     ui->chosenWriteFile->setText("");
     ui->chosenReadFile->setText("");
     writeFileValid = false;
@@ -368,7 +374,15 @@ void MainWindow::programmerBoardDisconnectedDuringOperation()
 
 void MainWindow::resetAndShowStatusPage()
 {
-    ui->progressBar->setValue(0);
+    //ui->progressBar->setValue(0);
+    // Show indeterminate progress bar until communication succeeds/fails
+    ui->progressBar->setRange(0, 0);
     ui->statusLabel->setText("Communicating with programmer (this may take a few seconds)...");
     ui->pages->setCurrentWidget(ui->statusPage);
+}
+
+void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
+{
+    uint32_t newCapacity = (uint32_t)ui->simmCapacityBox->itemData(index).toUInt();
+    p->setSIMMCapacity(newCapacity);
 }

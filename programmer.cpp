@@ -165,9 +165,6 @@ void Programmer::readSIMMToFile(QString filename)
     readFile->open(QFile::WriteOnly);
     lenRead = 0;
 
-    emit readTotalLengthChanged(2 * 1024 * 1024);
-    emit readCompletionLengthChanged(lenRead);
-
     startProgrammerCommand(ReadChips, ReadSIMMWaitingStartReply);
 }
 
@@ -182,8 +179,6 @@ void Programmer::writeFileToSIMM(QString filename)
     }
     lenWritten = 0;
     writeLenRemaining = writeFile->size();
-    emit writeTotalLengthChanged(writeLenRemaining);
-    emit writeCompletionLengthChanged(lenWritten);
 
     startProgrammerCommand(EraseChips, WriteSIMMWaitingEraseReply);
 }
@@ -225,6 +220,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WriteSIMMWaitingWriteReply;
             qDebug() << "Chips erased. Now asking to start writing...";
             emit writeStatusChanged(WriteEraseComplete);
+            emit writeTotalLengthChanged(writeLenRemaining);
+            emit writeCompletionLengthChanged(lenWritten);
             break;
         case CommandReplyError:
             qDebug() << "Error erasing chips.";
@@ -385,6 +382,8 @@ void Programmer::handleChar(uint8_t c)
     case ReadSIMMWaitingStartReply:
         emit readStatusChanged(ReadStarting);
         curState = ReadSIMMWaitingData;
+        emit readTotalLengthChanged(_simmCapacity);
+        emit readCompletionLengthChanged(0);
         readChunkLenRemaining = READ_CHUNK_SIZE;
         break;
     case ReadSIMMWaitingData:
@@ -888,4 +887,14 @@ void Programmer::openPort()
 void Programmer::closePort()
 {
     serialPort->close();
+}
+
+void Programmer::setSIMMCapacity(uint32_t bytes)
+{
+    _simmCapacity = bytes;
+}
+
+uint32_t Programmer::SIMMCapacity()
+{
+    return _simmCapacity;
 }

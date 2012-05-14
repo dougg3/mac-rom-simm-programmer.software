@@ -83,6 +83,8 @@ public:
     void getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device);
     void flashFirmware(QString filename);
     void startCheckingPorts();
+    void setSIMMCapacity(uint32_t bytes);
+    uint32_t SIMMCapacity();
 signals:
     void startStatusChanged(StartStatus status);
 
@@ -117,6 +119,7 @@ private:
     void sendByte(uint8_t b);
     uint8_t readByte();
     void handleChar(uint8_t c);
+    uint32_t _simmCapacity;
 
     uint32_t writeLenRemaining;
     uint32_t lenWritten;
