@@ -788,13 +788,18 @@ void Programmer::startBootloaderCommand(uint8_t commandByte, uint32_t newState)
     sendByte(GetBootloaderState);
 }
 
-
+#include <QTimer>
 void Programmer::portDiscovered(const QextPortInfo &info)
 {
     if ((foundState == ProgrammerBoardNotFound) &&
         (info.vendorID == PROGRAMMER_USB_VENDOR_ID) &&
-        (info.productID == PROGRAMMER_USB_DEVICE_ID))
+        (info.productID == PROGRAMMER_USB_DEVICE_ID) &&
+        (info.portName != ""))
     {
+        // Note: I check that portName != "" because QextSerialEnumerator seems to give me
+        // 2 notifications that match the vendor ID -- one is the real deal, and the other
+        // has a blank port name. If I match on the blank port name one, it breaks.
+
 #ifdef Q_WS_WIN
         programmerBoardPortName = "\\\\.\\" + info.portName;
 #else
@@ -802,42 +807,58 @@ void Programmer::portDiscovered(const QextPortInfo &info)
 #endif
         foundState = ProgrammerBoardFound;
 
-        closePort();
-        serialPort->setPortName(programmerBoardPortName);
+        // I create a temporary timer here because opening it immediately seems to crash
+        // Mac OS X in my limited testing. Don't worry about a memory leak -- the
+        // portDiscovered_internal() slot will delete the newly-allocated QTimer.
+        QTimer *t = new QTimer();
+        connect(t, SIGNAL(timeout()), SLOT(portDiscovered_internal()));
+        t->setInterval(50);
+        t->setSingleShot(true);
+        t->start();
+    }
+}
 
-        // Don't show the "control" screen if we intentionally
-        // reconnected the USB port because we are changing from bootloader
-        // to programmer mode or vice-versa.
-        if (curState == BootloaderStateAwaitingPlug)
+void Programmer::portDiscovered_internal()
+{
+    // Delete the QTimer that sent us this signal. Ugly, but it works...
+    sender()->deleteLater();
+
+    closePort();
+    serialPort->setPortName(programmerBoardPortName);
+
+    // Don't show the "control" screen if we intentionally
+    // reconnected the USB port because we are changing from bootloader
+    // to programmer mode or vice-versa.
+    if (curState == BootloaderStateAwaitingPlug)
+    {
+        openPort();
+        curState = nextState;
+        sendByte(nextSendByte);
+        // Special case: Send out notification we are starting an erase command.
+        // I don't have any hooks into the process between now and the erase reply.
+        if (nextSendByte == EraseChips)
         {
-            openPort();
-            curState = nextState;
-            sendByte(nextSendByte);
-            // Special case: Send out notification we are starting an erase command.
-            // I don't have any hooks into the process between now and the erase reply.
-            if (nextSendByte == EraseChips)
-            {
-                emit writeStatusChanged(WriteErasing);
-            }
+            emit writeStatusChanged(WriteErasing);
         }
-        else if (curState == BootloaderStateAwaitingPlugToBootloader)
-        {
-            openPort();
-            curState = nextState;
-            sendByte(nextSendByte);
-        }
-        else
-        {
-            emit programmerBoardConnected();
-        }
+    }
+    else if (curState == BootloaderStateAwaitingPlugToBootloader)
+    {
+        openPort();
+        curState = nextState;
+        sendByte(nextSendByte);
+    }
+    else
+    {
+        emit programmerBoardConnected();
     }
 }
 
 void Programmer::portRemoved(const QextPortInfo &info)
 {
     if ((info.vendorID == PROGRAMMER_USB_VENDOR_ID) &&
-        (info.productID == PROGRAMMER_USB_DEVICE_ID))
-    {
+        (info.productID == PROGRAMMER_USB_DEVICE_ID) &&
+        (foundState == ProgrammerBoardFound))
+    {       
         programmerBoardPortName = "";
         foundState = ProgrammerBoardNotFound;
 

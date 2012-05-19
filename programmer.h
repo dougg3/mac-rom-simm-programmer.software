@@ -146,6 +146,7 @@ private slots:
     void dataReady();
 
     void portDiscovered(const QextPortInfo &info);
+    void portDiscovered_internal();
     void portRemoved(const QextPortInfo &info);
 };
 
