@@ -32,6 +32,11 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->statusLabel->setText("");
     ui->cancelButton->setEnabled(false);
 
+    readFile = NULL;
+    writeFile = NULL;
+    verifyArray = NULL;
+    verifyBuffer = NULL;
+
     connect(p, SIGNAL(writeStatusChanged(WriteStatus)), SLOT(programmerWriteStatusChanged(WriteStatus)));
     connect(p, SIGNAL(writeTotalLengthChanged(uint32_t)), SLOT(programmerWriteTotalLengthChanged(uint32_t)));
     connect(p, SIGNAL(writeCompletionLengthChanged(uint32_t)), SLOT(programmerWriteCompletionLengthChanged(uint32_t)));
@@ -109,16 +114,58 @@ void MainWindow::on_selectReadFileButton_clicked()
 
 void MainWindow::on_readFromSIMMButton_clicked()
 {
-    resetAndShowStatusPage();
-    p->readSIMMToFile(ui->chosenReadFile->text());
-    qDebug() << "Reading from SIMM...";
+    // We are not doing a verify after a write..
+    readVerifying = false;
+    if (readFile)
+    {
+        readFile->close();
+        delete readFile;
+    }
+    readFile = new QFile(ui->chosenReadFile->text());
+    if (readFile)
+    {
+        if (!readFile->open(QFile::WriteOnly))
+        {
+            delete readFile;
+            readFile = NULL;
+            programmerReadStatusChanged(ReadError);
+            return;
+        }
+        resetAndShowStatusPage();
+        p->readSIMM(readFile);
+        qDebug() << "Reading from SIMM...";
+    }
+    else
+    {
+        programmerReadStatusChanged(ReadError);
+    }
 }
 
 void MainWindow::on_writeToSIMMButton_clicked()
 {
-    resetAndShowStatusPage();
-    p->writeFileToSIMM(ui->chosenWriteFile->text());
-    qDebug() << "Writing to SIMM...";
+    if (writeFile)
+    {
+        writeFile->close();
+        delete writeFile;
+    }
+    writeFile = new QFile(ui->chosenWriteFile->text());
+    if (writeFile)
+    {
+        if (!writeFile->open(QFile::ReadOnly))
+        {
+            delete writeFile;
+            writeFile = NULL;
+            programmerWriteStatusChanged(WriteError);
+            return;
+        }
+        resetAndShowStatusPage();
+        p->writeToSIMM(writeFile);
+        qDebug() << "Writing to SIMM...";
+    }
+    else
+    {
+        programmerWriteStatusChanged(WriteError);
+    }
 }
 
 void MainWindow::on_chosenWriteFile_textEdited(const QString &newText)
@@ -144,14 +191,61 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         ui->statusLabel->setText("Erasing SIMM (this may take a few seconds)...");
         break;
     case WriteComplete:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::information(this, "Write complete", "The write operation finished.");
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
+        if (ui->verifyAfterWriteBox->isChecked())
+        {
+            // Set up the read buffers
+            readVerifying = true;
+            if (verifyArray) delete verifyArray;
+            verifyArray = new QByteArray((int)p->SIMMCapacity(), 0);
+            if (verifyBuffer) delete verifyBuffer;
+            verifyBuffer = new QBuffer(verifyArray);
+            if (!verifyBuffer->open(QBuffer::ReadWrite))
+            {
+                delete verifyBuffer;
+                delete verifyArray;
+                verifyBuffer = NULL;
+                verifyArray = NULL;
+                programmerReadStatusChanged(ReadError);
+                return;
+            }
+
+            // Start reading from SIMM to temporary RAM buffer
+            resetAndShowStatusPage();
+            p->readSIMM(verifyBuffer);
+            qDebug() << "Reading from SIMM for verification...";
+        }
+        else
+        {
+            QMessageBox::information(this, "Write complete", "The write operation finished.");
+            ui->pages->setCurrentWidget(ui->controlPage);
+        }
         break;
     case WriteError:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write error", "An error occurred writing to the SIMM.");
         break;
     case WriteCancelled:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write cancelled", "The write operation was cancelled.");
         break;
@@ -159,14 +253,35 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         ui->statusLabel->setText("Writing SIMM...");
         break;
     case WriteEraseFailed:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write error", "An error occurred erasing the SIMM.");
         break;
     case WriteTimedOut:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write timed out", "The write operation timed out.");
         break;
     case WriteFileTooBig:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "File too big", "The file you chose to write to the SIMM is too big according to the chip size you have selected.");
         break;
@@ -237,23 +352,160 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
     switch (newStatus)
     {
     case ReadStarting:
-        ui->statusLabel->setText("Reading SIMM contents...");
+        if (readVerifying)
+        {
+            ui->statusLabel->setText("Verifying SIMM contents...");
+        }
+        else
+        {
+            ui->statusLabel->setText("Reading SIMM contents...");
+        }
         break;
     case ReadComplete:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::information(this, "Read complete", "The read operation finished.");
+        if (readVerifying)
+        {
+            // Re-open the write file temporarily to compare it against the buffer.
+            QFile temp(ui->chosenWriteFile->text());
+            if (!temp.open(QFile::ReadOnly))
+            {
+                QMessageBox::warning(this, "Verify failed", "Unable to open file for verification.");
+            }
+            else
+            {
+                QByteArray fileBytes = temp.readAll();
+
+                if (fileBytes.count() <= verifyArray->count())
+                {
+                    const char *fileBytesPtr = fileBytes.constData();
+                    const char *readBytesPtr = verifyArray->constData();
+
+                    if (memcmp(fileBytesPtr, readBytesPtr, fileBytes.count()) != 0)
+                    {
+                        QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it.");
+                    }
+                    else
+                    {
+                        QMessageBox::information(this, "Write complete", "The write operation finished, and the contents were verified successfully.");
+                    }
+                }
+                else
+                {
+                    QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it.");
+                }
+            }
+
+            // Close stuff not needed anymore
+            if (verifyBuffer)
+            {
+                verifyBuffer->close();
+                delete verifyBuffer;
+                verifyBuffer = NULL;
+            }
+
+            if (verifyArray)
+            {
+                delete verifyArray;
+                verifyArray = NULL;
+            }
+
+            ui->pages->setCurrentWidget(ui->controlPage);
+        }
+        else
+        {
+            if (readFile)
+            {
+                readFile->close();
+                delete readFile;
+                readFile = NULL;
+            }
+
+            ui->pages->setCurrentWidget(ui->controlPage);
+            QMessageBox::information(this, "Read complete", "The read operation finished.");
+        }
         break;
     case ReadError:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Read error", "An error occurred reading from the SIMM.");
+        if (readVerifying)
+        {
+            if (verifyBuffer)
+            {
+                verifyBuffer->close();
+                delete verifyBuffer;
+            }
+            verifyBuffer = NULL;
+            if (verifyArray) delete verifyArray;
+            verifyArray = NULL;
+
+            ui->pages->setCurrentWidget(ui->controlPage);
+            QMessageBox::warning(this, "Verify error", "An error occurred reading the SIMM contents for verification.");
+        }
+        else
+        {
+            if (readFile)
+            {
+                readFile->close();
+                delete readFile;
+                readFile = NULL;
+            }
+
+            ui->pages->setCurrentWidget(ui->controlPage);
+            QMessageBox::warning(this, "Read error", "An error occurred reading from the SIMM.");
+        }
         break;
     case ReadCancelled:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Read cancelled", "The read operation was cancelled.");
+        if (readVerifying)
+        {
+            if (verifyBuffer)
+            {
+                verifyBuffer->close();
+                delete verifyBuffer;
+            }
+            verifyBuffer = NULL;
+            if (verifyArray) delete verifyArray;
+            verifyArray = NULL;
+
+            ui->pages->setCurrentWidget(ui->controlPage);
+            QMessageBox::warning(this, "Verify cancelled", "The verify operation was cancelled.");
+        }
+        else
+        {
+            if (readFile)
+            {
+                readFile->close();
+                delete readFile;
+                readFile = NULL;
+            }
+
+            ui->pages->setCurrentWidget(ui->controlPage);
+            QMessageBox::warning(this, "Read cancelled", "The read operation was cancelled.");
+        }
         break;
     case ReadTimedOut:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Read timed out", "The read operation timed out.");
+        if (readVerifying)
+        {
+            if (verifyBuffer)
+            {
+                verifyBuffer->close();
+                delete verifyBuffer;
+            }
+            verifyBuffer = NULL;
+            if (verifyArray) delete verifyArray;
+            verifyArray = NULL;
+
+            ui->pages->setCurrentWidget(ui->controlPage);
+            QMessageBox::warning(this, "Verify timed out", "The verify operation timed out.");
+        }
+        else
+        {
+            if (readFile)
+            {
+                readFile->close();
+                delete readFile;
+                readFile = NULL;
+            }
+
+            ui->pages->setCurrentWidget(ui->controlPage);
+            QMessageBox::warning(this, "Read timed out", "The read operation timed out.");
+        }
         break;
     }
 }
@@ -373,6 +625,19 @@ void MainWindow::programmerBoardDisconnectedDuringOperation()
 {
     ui->pages->setCurrentWidget(ui->notConnectedPage);
     ui->actionUpdate_firmware->setEnabled(false);
+    // Make sure any files have been closed if we were in the middle of something.
+    if (writeFile)
+    {
+        writeFile->close();
+        delete writeFile;
+        writeFile = NULL;
+    }
+    if (readFile)
+    {
+        readFile->close();
+        delete readFile;
+        readFile = NULL;
+    }
     QMessageBox::warning(this, "Programmer lost connection", "Lost contact with the programmer board. Unplug it, plug it back in, and try again.");
 }
 

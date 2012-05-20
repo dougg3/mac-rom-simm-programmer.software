@@ -2,6 +2,9 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QFile>
+#include <QBuffer>
+#include <QByteArray>
 #include "programmer.h"
 
 namespace Ui {
@@ -59,7 +62,12 @@ private:
     Ui::MainWindow *ui;
     bool writeFileValid;
     bool readFileValid;
+    QFile *writeFile;
+    QFile *readFile;
+    QBuffer *verifyBuffer;
+    QByteArray *verifyArray;
     QString electricalTestString;
+    bool readVerifying;
 
     void resetAndShowStatusPage();
 };

@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QFile>
+#include <QIODevice>
 #include <qextserialport.h>
 #include <qextserialenumerator.h>
 #include <stdint.h>
@@ -77,8 +78,8 @@ class Programmer : public QObject
 public:
     explicit Programmer(QObject *parent = 0);
     virtual ~Programmer();
-    void readSIMMToFile(QString filename);
-    void writeFileToSIMM(QString filename);
+    void readSIMM(QIODevice *device);
+    void writeToSIMM(QIODevice *device);
     void runElectricalTest();
     QString electricalTestPinName(uint8_t index);
     void identifySIMMChips();
@@ -113,8 +114,10 @@ signals:
 public slots:
 
 private:
-    QFile *readFile;
-    QFile *writeFile;
+    //QFile *readFile;
+    //QFile *writeFile;
+    QIODevice *readDevice;
+    QIODevice *writeDevice;
     QFile *firmwareFile;
 
     QextSerialPort *serialPort;

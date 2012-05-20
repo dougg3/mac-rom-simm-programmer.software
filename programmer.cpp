@@ -160,19 +160,23 @@ Programmer::~Programmer()
     delete serialPort;
 }
 
-void Programmer::readSIMMToFile(QString filename)
+void Programmer::readSIMM(QIODevice *device)
 {
-    readFile = new QFile(filename);
-    readFile->open(QFile::WriteOnly);
+    //readFile = new QFile(filename);
+    //readFile->open(QFile::WriteOnly);
+    //lenRead = 0;
+    //lenRemaining = _simmCapacity;
+
+    readDevice = device;
     lenRead = 0;
     lenRemaining = _simmCapacity;
 
     startProgrammerCommand(ReadChips, ReadSIMMWaitingStartReply);
 }
 
-void Programmer::writeFileToSIMM(QString filename)
+void Programmer::writeToSIMM(QIODevice *device)
 {
-    writeFile = new QFile(filename);
+    /*writeFile = new QFile(filename);
     if (!writeFile->open(QFile::ReadOnly))
     {
         curState = WaitingForNextCommand;
@@ -189,6 +193,21 @@ void Programmer::writeFileToSIMM(QString filename)
     {
         lenWritten = 0;
         writeLenRemaining = writeFile->size();
+
+        startProgrammerCommand(EraseChips, WriteSIMMWaitingEraseReply);
+    }*/
+
+    writeDevice = device;
+    if (writeDevice->size() > _simmCapacity)
+    {
+        curState = WaitingForNextCommand;
+        emit writeStatusChanged(WriteFileTooBig);
+        return;
+    }
+    else
+    {
+        lenWritten = 0;
+        writeLenRemaining = writeDevice->size();
 
         startProgrammerCommand(EraseChips, WriteSIMMWaitingEraseReply);
     }
@@ -236,10 +255,9 @@ void Programmer::handleChar(uint8_t c)
             break;
         case CommandReplyError:
             qDebug() << "Error erasing chips.";
-            writeFile->close();
             curState = WaitingForNextCommand;
-            emit writeStatusChanged(WriteEraseFailed);
             closePort();
+            emit writeStatusChanged(WriteEraseFailed);
             break;
         }
         break;
@@ -264,10 +282,9 @@ void Programmer::handleChar(uint8_t c)
             break;
         case CommandReplyError:
             qDebug() << "Error entering write mode.";
-            writeFile->close();
             curState = WaitingForNextCommand;
-            emit writeStatusChanged(WriteError);
             closePort();
+            emit writeStatusChanged(WriteError);
             break;
         }
 
@@ -288,7 +305,7 @@ void Programmer::handleChar(uint8_t c)
             }
 
             // Read the chunk from the file!
-            QByteArray thisChunk = writeFile->read(chunkSize);
+            QByteArray thisChunk = writeDevice->read(chunkSize);
 
             // If it isn't a WRITE_CHUNK_SIZE chunk, pad the rest of it with 0xFFs (unprogrammed bytes)
             // so the total chunk size is WRITE_CHUNK_SIZE, since that's what the programmer board expects.
@@ -311,10 +328,9 @@ void Programmer::handleChar(uint8_t c)
         case ProgrammerWriteError:
         default:
             qDebug() << "Error writing to chips.";
-            writeFile->close();
             curState = WaitingForNextCommand;
-            emit writeStatusChanged(WriteError);
             closePort();
+            emit writeStatusChanged(WriteError);
             break;
         }
         break;
@@ -323,19 +339,17 @@ void Programmer::handleChar(uint8_t c)
         switch (c)
         {
         case ProgrammerWriteOK:
-            writeFile->close();
             curState = WaitingForNextCommand;
             qDebug() << "Write success at end";
-            emit writeStatusChanged(WriteComplete);
             closePort();
+            emit writeStatusChanged(WriteComplete);
             break;
         case ProgrammerWriteError:
         default:
             qDebug() << "Write failure at end";
             curState = WaitingForNextCommand;
-            writeFile->close();
-            emit writeStatusChanged(WriteError);
             closePort();
+            emit writeStatusChanged(WriteError);
             break;
         }
 
@@ -355,14 +369,16 @@ void Programmer::handleChar(uint8_t c)
         case CommandReplyInvalid:
         default:
             curState = WaitingForNextCommand;
-            emit electricalTestStatusChanged(ElectricalTestCouldntStart);
             closePort();
+            emit electricalTestStatusChanged(ElectricalTestCouldntStart);
         }
         break;
     case ElectricalTestWaitingNextStatus:
         switch (c)
         {
         case ProgrammerElectricalTestDone:
+            curState = WaitingForNextCommand;
+            closePort();
             if (electricalTestErrorCounter > 0)
             {
                 emit electricalTestStatusChanged(ElectricalTestFailed);
@@ -371,8 +387,6 @@ void Programmer::handleChar(uint8_t c)
             {
                 emit electricalTestStatusChanged(ElectricalTestPassed);
             }
-            curState = WaitingForNextCommand;
-            closePort();
             break;
         case ProgrammerElectricalTestFail:
             electricalTestErrorCounter++;
@@ -409,8 +423,8 @@ void Programmer::handleChar(uint8_t c)
         case CommandReplyError:
         case CommandReplyInvalid:
         default:
-            emit readStatusChanged(ReadError);
             curState = WaitingForNextCommand;
+            emit readStatusChanged(ReadError);
             break;
         }
         break;
@@ -426,13 +440,14 @@ void Programmer::handleChar(uint8_t c)
             break;
         case ProgrammerReadError:
         default:
-            emit readStatusChanged(ReadError);
             curState = WaitingForNextCommand;
+            closePort();
+            emit readStatusChanged(ReadError);
             break;
         }
         break;
     case ReadSIMMWaitingData:
-        readFile->write((const char *)&c, 1);
+        readDevice->write((const char *)&c, 1);
         lenRead++;
         if (--readChunkLenRemaining == 0)
         {
@@ -448,13 +463,11 @@ void Programmer::handleChar(uint8_t c)
         case ProgrammerReadFinished:
             curState = WaitingForNextCommand;
             closePort();
-            readFile->close();
             emit readStatusChanged(ReadComplete);
             break;
         case ProgrammerReadConfirmCancel:
             curState = WaitingForNextCommand;
             closePort();
-            readFile->close();
             emit readStatusChanged(ReadCancelled);
             break;
         case ProgrammerReadMoreData:
@@ -594,6 +607,8 @@ void Programmer::handleChar(uint8_t c)
         }
         break;
     case IdentificationAwaitingDoneReply:
+        curState = WaitingForNextCommand;
+        closePort();
         if (c == ProgrammerIdentifyDone)
         {
             emit identificationStatusChanged(IdentificationComplete);
@@ -602,7 +617,6 @@ void Programmer::handleChar(uint8_t c)
         {
             emit identificationStatusChanged(IdentificationError);
         }
-        curState = WaitingForNextCommand;
         break;
 
     // WRITE BOOTLOADER PROGRAM STATE HANDLERS
@@ -615,26 +629,26 @@ void Programmer::handleChar(uint8_t c)
         }
         else
         {
-            emit firmwareFlashStatusChanged(FirmwareFlashError);
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
     case BootloaderEraseProgramWaitingFinishReply:
         if (c == BootloaderWriteOK)
         {
-            emit firmwareFlashStatusChanged(FirmwareFlashComplete);
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            emit firmwareFlashStatusChanged(FirmwareFlashComplete);
         }
         else
         {
-            emit firmwareFlashStatusChanged(FirmwareFlashError);
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
     case BootloaderEraseProgramWaitingWriteMoreReply:
@@ -670,10 +684,10 @@ void Programmer::handleChar(uint8_t c)
         }
         else
         {
-            emit firmwareFlashStatusChanged(FirmwareFlashError);
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
     case BootloaderEraseProgramWaitingWriteReply:
@@ -693,10 +707,10 @@ void Programmer::handleChar(uint8_t c)
         }
         else
         {
-            emit firmwareFlashStatusChanged(FirmwareFlashError);
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
 
