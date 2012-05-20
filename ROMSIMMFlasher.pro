@@ -19,6 +19,6 @@ HEADERS  += mainwindow.h \
 
 FORMS    += mainwindow.ui
 
-include(../qextserialport/src/qextserialport.pri)
+include(../doug-qextserialport-linuxnotifications/src/qextserialport.pri)
 
 QMAKE_CXXFLAGS_RELEASE += -DQT_NO_DEBUG_OUTPUT

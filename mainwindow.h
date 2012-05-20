@@ -2,7 +2,6 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-//#include <qextserialenumerator.h>
 #include "programmer.h"
 
 namespace Ui {

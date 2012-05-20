@@ -5,6 +5,7 @@
 #include <QFile>
 #include <qextserialport.h>
 #include <qextserialenumerator.h>
+#include <stdint.h>
 
 typedef enum StartStatus
 {
