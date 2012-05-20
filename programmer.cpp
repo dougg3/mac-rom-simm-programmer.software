@@ -18,6 +18,7 @@ typedef enum ProgrammerCommandState
     ElectricalTestWaitingSecondFail,
 
     ReadSIMMWaitingStartReply,
+    ReadSIMMWaitingLengthReply,
     ReadSIMMWaitingData,
     ReadSIMMWaitingStatusReply,
 
@@ -164,6 +165,7 @@ void Programmer::readSIMMToFile(QString filename)
     readFile = new QFile(filename);
     readFile->open(QFile::WriteOnly);
     lenRead = 0;
+    lenRemaining = _simmCapacity;
 
     startProgrammerCommand(ReadChips, ReadSIMMWaitingStartReply);
 }
@@ -177,10 +179,19 @@ void Programmer::writeFileToSIMM(QString filename)
         emit writeStatusChanged(WriteError);
         return;
     }
-    lenWritten = 0;
-    writeLenRemaining = writeFile->size();
+    if (writeFile->size() > _simmCapacity)
+    {
+        curState = WaitingForNextCommand;
+        emit writeStatusChanged(WriteFileTooBig);
+        return;
+    }
+    else
+    {
+        lenWritten = 0;
+        writeLenRemaining = writeFile->size();
 
-    startProgrammerCommand(EraseChips, WriteSIMMWaitingEraseReply);
+        startProgrammerCommand(EraseChips, WriteSIMMWaitingEraseReply);
+    }
 }
 
 void Programmer::sendByte(uint8_t b)
@@ -380,11 +391,45 @@ void Programmer::handleChar(uint8_t c)
 
     // READ SIMM STATE HANDLERS
     case ReadSIMMWaitingStartReply:
-        emit readStatusChanged(ReadStarting);
-        curState = ReadSIMMWaitingData;
-        emit readTotalLengthChanged(_simmCapacity);
-        emit readCompletionLengthChanged(0);
-        readChunkLenRemaining = READ_CHUNK_SIZE;
+        switch (c)
+        {
+        case CommandReplyOK:
+
+            emit readStatusChanged(ReadStarting);
+            curState = ReadSIMMWaitingLengthReply;
+
+            // Send the length requesting to be read
+            sendByte((lenRemaining >> 0)  & 0xFF);
+            sendByte((lenRemaining >> 8)  & 0xFF);
+            sendByte((lenRemaining >> 16) & 0xFF);
+            sendByte((lenRemaining >> 24) & 0xFF);
+
+            // Now wait for the go-ahead from the programmer's side
+            break;
+        case CommandReplyError:
+        case CommandReplyInvalid:
+        default:
+            emit readStatusChanged(ReadError);
+            curState = WaitingForNextCommand;
+            break;
+        }
+        break;
+
+    case ReadSIMMWaitingLengthReply:
+        switch (c)
+        {
+        case ProgrammerReadOK:
+            curState = ReadSIMMWaitingData;
+            emit readTotalLengthChanged(_simmCapacity);
+            emit readCompletionLengthChanged(0);
+            readChunkLenRemaining = READ_CHUNK_SIZE;
+            break;
+        case ProgrammerReadError:
+        default:
+            emit readStatusChanged(ReadError);
+            curState = WaitingForNextCommand;
+            break;
+        }
         break;
     case ReadSIMMWaitingData:
         readFile->write((const char *)&c, 1);

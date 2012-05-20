@@ -166,6 +166,10 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write timed out", "The write operation timed out.");
         break;
+    case WriteFileTooBig:
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "File too big", "The file you chose to write to the SIMM is too big according to the chip size you have selected.");
+        break;
     }
 }
 

@@ -30,7 +30,8 @@ typedef enum WriteStatus
     WriteCancelled,
     WriteEraseComplete,
     WriteEraseFailed,
-    WriteTimedOut
+    WriteTimedOut,
+    WriteFileTooBig
 } WriteStatus;
 
 typedef enum ElectricalTestStatus
@@ -129,6 +130,7 @@ private:
 
     uint32_t readChunkLenRemaining;
     uint32_t lenRead;
+    uint32_t lenRemaining;
 
     int identificationCounter;
     uint8_t chipManufacturerIDs[4];
