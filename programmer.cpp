@@ -129,8 +129,8 @@ typedef enum ComputerBootloaderEraseWriteRequest
     ComputerBootloaderCancel
 } ComputerBootloaderEraseWriteRequest;
 
-#define PROGRAMMER_USB_VENDOR_ID            0x03EB
-#define PROGRAMMER_USB_DEVICE_ID            0x204B
+#define PROGRAMMER_USB_VENDOR_ID            0x16D0
+#define PROGRAMMER_USB_DEVICE_ID            0x06AA
 
 
 #define WRITE_CHUNK_SIZE    1024
