@@ -26,3 +26,6 @@ FORMS    += mainwindow.ui \
 include(../doug-qextserialport-linuxnotifications/src/qextserialport.pri)
 
 QMAKE_CXXFLAGS_RELEASE += -DQT_NO_DEBUG_OUTPUT
+
+macx:CONFIG += x86
+macx:CONFIG += x86_64
