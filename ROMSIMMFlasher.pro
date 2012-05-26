@@ -6,18 +6,22 @@
 
 QT       += core gui
 
-TARGET = ROMSIMMFlasher
+TARGET = SIMMProgrammer
 TEMPLATE = app
 
 
 SOURCES += main.cpp\
         mainwindow.cpp \
-    programmer.cpp
+    programmer.cpp \
+    aboutbox.cpp
 
 HEADERS  += mainwindow.h \
-    programmer.h
+    programmer.h \
+    aboutbox.h \
+    version.h
 
-FORMS    += mainwindow.ui
+FORMS    += mainwindow.ui \
+    aboutbox.ui
 
 include(../doug-qextserialport-linuxnotifications/src/qextserialport.pri)
 

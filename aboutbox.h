@@ -17,14 +17,28 @@
  *
  */
 
-#include <QtGui/QApplication>
-#include "mainwindow.h"
+#ifndef ABOUTBOX_H
+#define ABOUTBOX_H
 
-int main(int argc, char *argv[])
-{
-    QApplication a(argc, argv);
-    MainWindow w;
-    w.show();
-    
-    return a.exec();
+#include <QDialog>
+
+namespace Ui {
+class AboutBox;
 }
+
+class AboutBox : public QDialog
+{
+    Q_OBJECT
+    
+public:
+    static AboutBox *instance();
+private slots:
+    void on_buttonBox_accepted();
+
+private:
+    Ui::AboutBox *ui;
+    explicit AboutBox(QWidget *parent = 0);
+    ~AboutBox();
+};
+
+#endif // ABOUTBOX_H

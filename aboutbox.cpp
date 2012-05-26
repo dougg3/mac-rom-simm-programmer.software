@@ -17,14 +17,36 @@
  *
  */
 
-#include <QtGui/QApplication>
-#include "mainwindow.h"
+#include "aboutbox.h"
+#include "ui_aboutbox.h"
+#include "version.h"
 
-int main(int argc, char *argv[])
+AboutBox *AboutBox::instance()
 {
-    QApplication a(argc, argv);
-    MainWindow w;
-    w.show();
-    
-    return a.exec();
+    // Singleton about box
+    static AboutBox *_instance = NULL;
+    if (!_instance)
+    {
+        _instance = new AboutBox();
+    }
+    return _instance;
+}
+
+AboutBox::AboutBox(QWidget *parent) :
+    QDialog(parent),
+    ui(new Ui::AboutBox)
+{
+    ui->setupUi(this);
+
+    ui->versionLabel->setText("Version " VERSION_STRING);
+}
+
+AboutBox::~AboutBox()
+{
+    delete ui;
+}
+
+void AboutBox::on_buttonBox_accepted()
+{
+    this->close();
 }

@@ -1,6 +1,26 @@
+/*
+ * Copyright (C) 2011-2012 Doug Brown
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ *
+ */
+
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "programmer.h"
+#include "aboutbox.h"
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDebug>
@@ -654,4 +674,9 @@ void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
 {
     uint32_t newCapacity = (uint32_t)ui->simmCapacityBox->itemData(index).toUInt();
     p->setSIMMCapacity(newCapacity);
+}
+
+void MainWindow::on_actionAbout_SIMM_Programmer_triggered()
+{
+    AboutBox::instance()->show();
 }

@@ -17,14 +17,15 @@
  *
  */
 
-#include <QtGui/QApplication>
-#include "mainwindow.h"
+#ifndef VERSION_H
+#define VERSION_H
 
-int main(int argc, char *argv[])
-{
-    QApplication a(argc, argv);
-    MainWindow w;
-    w.show();
-    
-    return a.exec();
-}
+#define VERSION_MAJOR       1
+#define VERSION_MINOR       0
+#define VERSION_REVISION    0
+
+#define STRINGIFY_GUTS(x)   #x
+#define STRINGIFY(x)        STRINGIFY_GUTS(x)
+#define VERSION_STRING STRINGIFY(VERSION_MAJOR) "." STRINGIFY(VERSION_MINOR) "." STRINGIFY(VERSION_REVISION)
+
+#endif // VERSION_H
