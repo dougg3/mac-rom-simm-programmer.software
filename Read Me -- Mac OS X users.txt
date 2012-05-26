@@ -1,0 +1,14 @@
+-------------------------------------------------------------------------------
+  Important notice for Mac OS X users:
+-------------------------------------------------------------------------------
+
+When you first plug the programmer board into your computer, Mac OS X will
+probably bring up a window telling you that a new network interface has been
+detected. This message will perpetually annoy you unless you go into the
+Network System Preferences and click "Apply" to add the programmer board as a
+network interface.
+
+The reason it does this is because the programmer board identifies itself to
+computers as a USB CDC class modem, which is basically a serial port simulated
+over USB that doesn't require drivers in Mac OS X and Linux. The drawback of
+this approach is that Mac OS X thinks it is a modem.

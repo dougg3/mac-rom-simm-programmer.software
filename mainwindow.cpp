@@ -72,35 +72,6 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(p, SIGNAL(programmerBoardDisconnected()), SLOT(programmerBoardDisconnected()));
     connect(p, SIGNAL(programmerBoardDisconnectedDuringOperation()), SLOT(programmerBoardDisconnectedDuringOperation()));
     p->startCheckingPorts();
-
-    /*QList<QextPortInfo> l = QextSerialEnumerator::getPorts();
-    foreach (QextPortInfo p, l)
-    {
-        qDebug() << "Found port...";
-        qDebug() << "Enum name:" << p.enumName;
-        qDebug() << "Friend name:" << p.friendName;
-        qDebug() << "Phys name:" << p.physName;
-        qDebug() << "Port name:" << p.portName;
-        qDebug() << "Product ID:" << hex << p.productID;
-        qDebug() << "Vendor ID:" << hex << p.vendorID;
-        qDebug() << "";
-
-#ifdef Q_WS_WIN
-        if (p.portName.startsWith("COM"))
-#endif
-        {
-            // TODO: Do checking for valid USB ID?
-
-            if ((p.vendorID == 0x03EB) && (p.productID == 0x204B))
-            {
-                ui->portList->addItem(QString("%1 (Programmer)").arg(p.portName), QVariant(p.portName));
-            }
-            else
-            {
-                ui->portList->addItem(p.portName, QVariant(p.portName));
-            }
-        }
-    }*/
 }
 
 MainWindow::~MainWindow()
@@ -662,7 +633,6 @@ void MainWindow::programmerBoardDisconnectedDuringOperation()
 
 void MainWindow::resetAndShowStatusPage()
 {
-    //ui->progressBar->setValue(0);
     // Show indeterminate progress bar until communication succeeds/fails
     ui->progressBar->setRange(0, 0);
     ui->statusLabel->setText("Communicating with programmer (this may take a few seconds)...");

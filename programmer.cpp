@@ -181,11 +181,6 @@ Programmer::~Programmer()
 
 void Programmer::readSIMM(QIODevice *device)
 {
-    //readFile = new QFile(filename);
-    //readFile->open(QFile::WriteOnly);
-    //lenRead = 0;
-    //lenRemaining = _simmCapacity;
-
     readDevice = device;
     lenRead = 0;
     lenRemaining = _simmCapacity;
@@ -195,27 +190,6 @@ void Programmer::readSIMM(QIODevice *device)
 
 void Programmer::writeToSIMM(QIODevice *device)
 {
-    /*writeFile = new QFile(filename);
-    if (!writeFile->open(QFile::ReadOnly))
-    {
-        curState = WaitingForNextCommand;
-        emit writeStatusChanged(WriteError);
-        return;
-    }
-    if (writeFile->size() > _simmCapacity)
-    {
-        curState = WaitingForNextCommand;
-        emit writeStatusChanged(WriteFileTooBig);
-        return;
-    }
-    else
-    {
-        lenWritten = 0;
-        writeLenRemaining = writeFile->size();
-
-        startProgrammerCommand(EraseChips, WriteSIMMWaitingEraseReply);
-    }*/
-
     writeDevice = device;
     if (writeDevice->size() > _simmCapacity)
     {
