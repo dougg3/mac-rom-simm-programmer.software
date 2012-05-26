@@ -48,7 +48,6 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->writeToSIMMButton->setEnabled(false);
     ui->readFromSIMMButton->setEnabled(false);
     ui->progressBar->setValue(0);
-    ui->progressBar->setEnabled(false);
     ui->statusLabel->setText("");
     ui->cancelButton->setEnabled(false);
 
