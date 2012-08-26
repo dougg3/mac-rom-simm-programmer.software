@@ -79,8 +79,11 @@ private slots:
 
     void on_actionAbout_SIMM_Programmer_triggered();
 
+    void on_verifyAfterWriteBox_toggled(bool checked);
+
 private:
     Ui::MainWindow *ui;
+    bool initializing;
     bool writeFileValid;
     bool readFileValid;
     QFile *writeFile;

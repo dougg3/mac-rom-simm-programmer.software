@@ -24,13 +24,24 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDebug>
+#include <QSettings>
 
 static Programmer *p;
+
+#define selectedCapacityKey     "selectedCapacity"
+#define verifyAfterWriteKey     "verifyAfterWrite"
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow)
 {
+    initializing = true;
+    // Make default QSettings use these settings
+    QCoreApplication::setOrganizationName("Doug Brown");
+    QCoreApplication::setOrganizationDomain("downtowndougbrown.com");
+    QCoreApplication::setApplicationName("SIMMProgrammer");
+    QSettings settings;
+
     p = new Programmer();
     ui->setupUi(this);
     ui->pages->setCurrentWidget(ui->notConnectedPage);
@@ -45,12 +56,16 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->simmCapacityBox->addItem("1 MB (8 Mb) per chip * 4 chips = 4 MB", QVariant(4 * 1024 * 1024));
     ui->simmCapacityBox->addItem("2 MB (16 Mb) per chip * 4 chips = 8 MB", QVariant(8 * 1024 * 1024));
 
-    // Select 2 MB by default (it's what most people will want)
-    int index2MB = ui->simmCapacityBox->findData(QVariant(2 * 1024 * 1024));
-    if (index2MB != -1)
+    // Select 2 MB by default (it's what most people will want), or load last-used setting
+    QVariant selectedCapacity = settings.value(selectedCapacityKey, QVariant(2 * 1024 * 1024));
+    int selectedIndex = ui->simmCapacityBox->findData(selectedCapacity);
+    if (selectedIndex != -1)
     {
-        ui->simmCapacityBox->setCurrentIndex(index2MB);
+        ui->simmCapacityBox->setCurrentIndex(selectedIndex);
     }
+
+    // Decide whether or not to verify after write
+    ui->verifyAfterWriteBox->setChecked(settings.value(verifyAfterWriteKey, true).toBool());
 
     ui->chosenWriteFile->setText("");
     ui->chosenReadFile->setText("");
@@ -83,6 +98,8 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(p, SIGNAL(programmerBoardDisconnected()), SLOT(programmerBoardDisconnected()));
     connect(p, SIGNAL(programmerBoardDisconnectedDuringOperation()), SLOT(programmerBoardDisconnectedDuringOperation()));
     p->startCheckingPorts();
+
+    initializing = false;
 }
 
 MainWindow::~MainWindow()
@@ -654,6 +671,20 @@ void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
 {
     uint32_t newCapacity = (uint32_t)ui->simmCapacityBox->itemData(index).toUInt();
     p->setSIMMCapacity(newCapacity);
+    QSettings settings;
+    if (!initializing)
+    {
+        // If we're not initializing (it gets called while we're initializing),
+        // go ahead and save this as the new default.
+        settings.setValue(selectedCapacityKey, newCapacity);
+    }
+}
+
+void MainWindow::on_verifyAfterWriteBox_toggled(bool checked)
+{
+    // Save this as the new default.
+    QSettings settings;
+    settings.setValue(verifyAfterWriteKey, checked);
 }
 
 void MainWindow::on_actionAbout_SIMM_Programmer_triggered()
