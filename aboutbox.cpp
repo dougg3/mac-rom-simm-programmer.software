@@ -37,7 +37,7 @@ AboutBox::AboutBox(QWidget *parent) :
     ui(new Ui::AboutBox)
 {
     ui->setupUi(this);
-#ifdef Q_OS_MACX
+#if defined(Q_OS_MACX) || defined(Q_OS_LINUX)
     resize(width() + 50, height() + 100);
 #endif
 
