@@ -36,10 +36,21 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->pages->setCurrentWidget(ui->notConnectedPage);
     ui->actionUpdate_firmware->setEnabled(false);
 
-    // Fill in the list of SIMM chip capacities (should support chips ranging from 128KB to 512KB in size (= 1, 2, or 4 Mb)
+    // Fill in the list of SIMM chip capacities (programmer can support anywhere up to 8 MB of space)
+    ui->simmCapacityBox->addItem("32 KB (256 Kb) per chip * 4 chips = 128 KB", QVariant(128 * 1024));
+    ui->simmCapacityBox->addItem("64 KB (512 Kb) per chip * 4 chips = 256 KB", QVariant(256 * 1024));
     ui->simmCapacityBox->addItem("128 KB (1 Mb) per chip * 4 chips = 512 KB", QVariant(512 * 1024));
     ui->simmCapacityBox->addItem("256 KB (2 Mb) per chip * 4 chips = 1 MB", QVariant(1 * 1024 * 1024));
     ui->simmCapacityBox->addItem("512 KB (4 Mb) per chip * 4 chips = 2 MB", QVariant(2 * 1024 * 1024));
+    ui->simmCapacityBox->addItem("1 MB (8 Mb) per chip * 4 chips = 4 MB", QVariant(4 * 1024 * 1024));
+    ui->simmCapacityBox->addItem("2 MB (16 Mb) per chip * 4 chips = 8 MB", QVariant(8 * 1024 * 1024));
+
+    // Select 2 MB by default (it's what most people will want)
+    int index2MB = ui->simmCapacityBox->findData(QVariant(2 * 1024 * 1024));
+    if (index2MB != -1)
+    {
+        ui->simmCapacityBox->setCurrentIndex(index2MB);
+    }
 
     ui->chosenWriteFile->setText("");
     ui->chosenReadFile->setText("");
