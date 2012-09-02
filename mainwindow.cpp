@@ -256,6 +256,17 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write error", "An error occurred writing to the SIMM.");
         break;
+    case WriteNeedsFirmwareUpdate:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
+        break;
     case WriteCancelled:
         if (writeFile)
         {
@@ -569,6 +580,10 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
     case IdentificationTimedOut:
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Identification timed out", "The identification operation timed out.");
+        break;
+    case IdentificationNeedsFirmwareUpdate:
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
         break;
     }
 }

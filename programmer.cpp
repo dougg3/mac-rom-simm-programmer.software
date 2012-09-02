@@ -26,6 +26,7 @@ typedef enum ProgrammerCommandState
 {
     WaitingForNextCommand = 0,
 
+    WriteSIMMWaitingSetSizeReply,
     WriteSIMMWaitingEraseReply,
     WriteSIMMWaitingWriteReply,
     WriteSIMMWaitingFinishReply,
@@ -50,6 +51,7 @@ typedef enum ProgrammerCommandState
     BootloaderStateAwaitingUnplugToBootloader,
     BootloaderStateAwaitingPlugToBootloader,
 
+    IdentificationWaitingSetSizeReply,
     IdentificationAwaitingOKReply,
     IdentificationWaitingData,
     IdentificationAwaitingDoneReply,
@@ -78,7 +80,9 @@ typedef enum ProgrammerCommand
     GetBootloaderState,
     EnterBootloader,
     EnterProgrammer,
-    BootloaderEraseAndWriteProgram
+    BootloaderEraseAndWriteProgram,
+    SetSIMMTypePLCC32_2MB,
+    SetSIMMTypeLarger
 } ProgrammerCommand;
 
 typedef enum ProgrammerReply
@@ -191,7 +195,7 @@ void Programmer::readSIMM(QIODevice *device)
 void Programmer::writeToSIMM(QIODevice *device)
 {
     writeDevice = device;
-    if (writeDevice->size() > _simmCapacity)
+    if (writeDevice->size() > SIMMCapacity())
     {
         curState = WaitingForNextCommand;
         emit writeStatusChanged(WriteFileTooBig);
@@ -202,7 +206,18 @@ void Programmer::writeToSIMM(QIODevice *device)
         lenWritten = 0;
         writeLenRemaining = writeDevice->size();
 
-        startProgrammerCommand(EraseChips, WriteSIMMWaitingEraseReply);
+        //startProgrammerCommand(EraseChips, WriteSIMMWaitingEraseReply);
+        // Based on the SIMM size, tell the programmer board.
+        uint8_t setSizeCommand;
+        if (SIMMCapacity() > 2*1024*1024)
+        {
+            setSizeCommand = SetSIMMTypeLarger;
+        }
+        else
+        {
+            setSizeCommand = SetSIMMTypePLCC32_2MB;
+        }
+        startProgrammerCommand(setSizeCommand, WriteSIMMWaitingSetSizeReply);
     }
 }
 
@@ -233,6 +248,42 @@ void Programmer::handleChar(uint8_t c)
     {
     case WaitingForNextCommand:
         // Not expecting anything. Ignore it.
+        break;
+    case WriteSIMMWaitingSetSizeReply:
+        switch (c)
+        {
+        case CommandReplyOK:
+            // If we got an OK reply, we're ready to go, so start...
+            sendByte(EraseChips);
+            curState = WriteSIMMWaitingEraseReply;
+            break;
+        case CommandReplyInvalid:
+        case CommandReplyError:
+            // If we got an error reply, we MAY still be OK unless we were
+            // requesting the large SIMM type, in which case the firmware
+            // doesn't support the large SIMM type so the user needs to know.
+            if (SIMMCapacity() > 2*1024*1024)
+            {
+                // Uh oh -- this is an old firmware that doesn't support a big
+                // SIMM. Let the caller know that the programmer board needs a
+                // firmware update.
+                qDebug() << "Programmer board needs firmware update.";
+                curState = WaitingForNextCommand;
+                closePort();
+                emit writeStatusChanged(WriteNeedsFirmwareUpdate);
+            }
+            else
+            {
+                // Error reply, but we're writing a small SIMM, so the firmware
+                // doesn't need updating -- it just didn't know how to handle
+                // the "set size" command. But that's OK -- it only supports
+                // the size we requested, so nothing's wrong.
+                sendByte(EraseChips);
+                curState = WriteSIMMWaitingEraseReply;
+            }
+            break;
+        }
+
         break;
     case WriteSIMMWaitingEraseReply:
     {
@@ -417,6 +468,7 @@ void Programmer::handleChar(uint8_t c)
         case CommandReplyInvalid:
         default:
             curState = WaitingForNextCommand;
+            closePort();
             emit readStatusChanged(ReadError);
             break;
         }
@@ -569,6 +621,41 @@ void Programmer::handleChar(uint8_t c)
         break;
 
     // IDENTIFICATION STATE HANDLERS
+    case IdentificationWaitingSetSizeReply:
+        switch (c)
+        {
+        case CommandReplyOK:
+            // If we got an OK reply, we're ready to go, so start...
+            sendByte(IdentifyChips);
+            curState = IdentificationAwaitingOKReply;
+            break;
+        case CommandReplyInvalid:
+        case CommandReplyError:
+            // If we got an error reply, we MAY still be OK unless we were
+            // requesting the large SIMM type, in which case the firmware
+            // doesn't support the large SIMM type so the user needs to know.
+            if (SIMMCapacity() > 2*1024*1024)
+            {
+                // Uh oh -- this is an old firmware that doesn't support a big
+                // SIMM. Let the caller know that the programmer board needs a
+                // firmware update.
+                qDebug() << "Programmer board needs firmware update.";
+                curState = WaitingForNextCommand;
+                closePort();
+                emit identificationStatusChanged(IdentificationNeedsFirmwareUpdate);
+            }
+            else
+            {
+                // Error reply, but we're identifying a small SIMM, so the firmware
+                // doesn't need updating -- it just didn't know how to handle
+                // the "set size" command. But that's OK -- it only supports
+                // the size we requested, so nothing's wrong.
+                sendByte(IdentifyChips);
+                curState = IdentificationAwaitingOKReply;
+            }
+            break;
+        }
+        break;
     case IdentificationAwaitingOKReply:
         if (c == CommandReplyOK)
         {
@@ -579,6 +666,8 @@ void Programmer::handleChar(uint8_t c)
         }
         else
         {
+            // Error -- close the port, we're done!
+            closePort();
             emit identificationStatusChanged(IdentificationError);
             curState = WaitingForNextCommand;
         }
@@ -775,7 +864,18 @@ QString Programmer::electricalTestPinName(uint8_t index)
 
 void Programmer::identifySIMMChips()
 {
-    startProgrammerCommand(IdentifyChips, IdentificationAwaitingOKReply);
+    //startProgrammerCommand(IdentifyChips, IdentificationAwaitingOKReply);
+    // Based on the SIMM size, tell the programmer board.
+    uint8_t setSizeCommand;
+    if (SIMMCapacity() > 2*1024*1024)
+    {
+        setSizeCommand = SetSIMMTypeLarger;
+    }
+    else
+    {
+        setSizeCommand = SetSIMMTypePLCC32_2MB;
+    }
+    startProgrammerCommand(setSizeCommand, IdentificationWaitingSetSizeReply);
 }
 
 void Programmer::getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device)

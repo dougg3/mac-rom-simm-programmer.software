@@ -51,7 +51,8 @@ typedef enum WriteStatus
     WriteEraseComplete,
     WriteEraseFailed,
     WriteTimedOut,
-    WriteFileTooBig
+    WriteFileTooBig,
+    WriteNeedsFirmwareUpdate
 } WriteStatus;
 
 typedef enum ElectricalTestStatus
@@ -68,7 +69,8 @@ typedef enum IdentificationStatus
     IdentificationStarting,
     IdentificationComplete,
     IdentificationError,
-    IdentificationTimedOut
+    IdentificationTimedOut,
+    IdentificationNeedsFirmwareUpdate
 } IdentificationStatus;
 
 typedef enum FirmwareFlashStatus
