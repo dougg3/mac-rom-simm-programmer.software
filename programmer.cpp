@@ -183,11 +183,31 @@ Programmer::~Programmer()
     delete serialPort;
 }
 
-void Programmer::readSIMM(QIODevice *device)
+void Programmer::readSIMM(QIODevice *device, uint32_t len)
 {
     readDevice = device;
     lenRead = 0;
-    lenRemaining = _simmCapacity;
+
+    // Len == 0 means read the entire SIMM
+    if (len == 0)
+    {
+        lenRemaining = _simmCapacity;
+        trueLenToRead = _simmCapacity;
+    }
+    else if (len % READ_CHUNK_SIZE)
+    {
+        // We have to read a full chunk of data, so we read a little bit
+        // past the actual length requested but only return the amount
+        // requested.
+        uint32_t lastExtraChunk = (len % READ_CHUNK_SIZE);
+        lenRemaining = len - lastExtraChunk + READ_CHUNK_SIZE;
+        trueLenToRead = len;
+    }
+    else // already a multiple of READ_CHUNK_SIZE, no correction needed
+    {
+        lenRemaining = len;
+        trueLenToRead = len;
+    }
 
     startProgrammerCommand(ReadChips, ReadSIMMWaitingStartReply);
 }
@@ -206,7 +226,6 @@ void Programmer::writeToSIMM(QIODevice *device)
         lenWritten = 0;
         writeLenRemaining = writeDevice->size();
 
-        //startProgrammerCommand(EraseChips, WriteSIMMWaitingEraseReply);
         // Based on the SIMM size, tell the programmer board.
         uint8_t setSizeCommand;
         if (SIMMCapacity() > 2*1024*1024)
@@ -254,6 +273,10 @@ void Programmer::handleChar(uint8_t c)
         {
         case CommandReplyOK:
             // If we got an OK reply, we're ready to go, so start...
+
+            // Special case: Send out notification we are starting an erase command.
+            // I don't have any hooks into the process between now and the erase reply.
+            emit writeStatusChanged(WriteErasing);
             sendByte(EraseChips);
             curState = WriteSIMMWaitingEraseReply;
             break;
@@ -278,6 +301,9 @@ void Programmer::handleChar(uint8_t c)
                 // doesn't need updating -- it just didn't know how to handle
                 // the "set size" command. But that's OK -- it only supports
                 // the size we requested, so nothing's wrong.
+                // Special case: Send out notification we are starting an erase command.
+                // I don't have any hooks into the process between now and the erase reply.
+                emit writeStatusChanged(WriteErasing);
                 sendByte(EraseChips);
                 curState = WriteSIMMWaitingEraseReply;
             }
@@ -479,7 +505,7 @@ void Programmer::handleChar(uint8_t c)
         {
         case ProgrammerReadOK:
             curState = ReadSIMMWaitingData;
-            emit readTotalLengthChanged(_simmCapacity);
+            emit readTotalLengthChanged(lenRemaining);
             emit readCompletionLengthChanged(0);
             readChunkLenRemaining = READ_CHUNK_SIZE;
             break;
@@ -492,7 +518,12 @@ void Programmer::handleChar(uint8_t c)
         }
         break;
     case ReadSIMMWaitingData:
-        readDevice->write((const char *)&c, 1);
+        // Only keep adding to the readback if we need to
+        if (lenRead < trueLenToRead)
+        {
+            readDevice->write((const char *)&c, 1);
+        }
+
         lenRead++;
         if (--readChunkLenRemaining == 0)
         {
@@ -564,12 +595,6 @@ void Programmer::handleChar(uint8_t c)
             emit startStatusChanged(ProgrammerInitialized);
             curState = nextState;
             sendByte(nextSendByte);
-            // Special case: Send out notification we are starting an erase command.
-            // I don't have any hooks into the process between now and the erase reply.
-            if (nextSendByte == EraseChips)
-            {
-                emit writeStatusChanged(WriteErasing);
-            }
             break;
             // TODO: Otherwise, raise an error?
         }
@@ -986,12 +1011,6 @@ void Programmer::portDiscovered_internal()
         openPort();
         curState = nextState;
         sendByte(nextSendByte);
-        // Special case: Send out notification we are starting an erase command.
-        // I don't have any hooks into the process between now and the erase reply.
-        if (nextSendByte == EraseChips)
-        {
-            emit writeStatusChanged(WriteErasing);
-        }
     }
     else if (curState == BootloaderStateAwaitingPlugToBootloader)
     {

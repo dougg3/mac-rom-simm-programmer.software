@@ -99,7 +99,7 @@ class Programmer : public QObject
 public:
     explicit Programmer(QObject *parent = 0);
     virtual ~Programmer();
-    void readSIMM(QIODevice *device);
+    void readSIMM(QIODevice *device, uint32_t len = 0);
     void writeToSIMM(QIODevice *device);
     void runElectricalTest();
     QString electricalTestPinName(uint8_t index);
@@ -154,6 +154,7 @@ private:
 
     uint32_t readChunkLenRemaining;
     uint32_t lenRead;
+    uint32_t trueLenToRead;
     uint32_t lenRemaining;
 
     int identificationCounter;

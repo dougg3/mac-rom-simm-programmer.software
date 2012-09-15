@@ -236,7 +236,26 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
 
             // Start reading from SIMM to temporary RAM buffer
             resetAndShowStatusPage();
-            p->readSIMM(verifyBuffer);
+
+            // Only read back the size of the file if we can. This will save
+            // some time and prevent us from needing to read the ENTIRE SIMM
+            // if the file is only a quarter of the size of the SIMM.
+            uint32_t readLen = 0;
+            QFile temp(ui->chosenWriteFile->text());
+            if (temp.exists())
+            {
+                qint64 tmpLen = temp.size();
+                if (tmpLen > 0)
+                {
+                    readLen = static_cast<uint32_t>(tmpLen);
+                }
+                else
+                {
+                    readLen = 0;
+                }
+            }
+
+            p->readSIMM(verifyBuffer, readLen);
             qDebug() << "Reading from SIMM for verification...";
         }
         else
@@ -410,7 +429,47 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
 
                     if (memcmp(fileBytesPtr, readBytesPtr, fileBytes.count()) != 0)
                     {
-                        QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it.");
+                        // Now let's do some trickery and figure out which chip is acting up (or chips)
+                        uint8_t badICMask = 0;
+
+                        // Keep a list of which chips are reading bad data back
+                        for (int x = 0; (x < fileBytes.count()) && (badICMask != 0xF); x++)
+                        {
+                            if (fileBytesPtr[x] != readBytesPtr[x])
+                            {
+                                // OK, we found a mismatched byte. Now look at
+                                // which byte (0-3) it is in each 4-byte group.
+                                // If it's byte 0, it's the MOST significant byte
+                                // because the 68k is big endian. IC4 contains the
+                                // MSB, so IC4 is the first chip, IC3 second, and
+                                // so on. That's why I subtract it from 3 --
+                                // 0 through 3 get mapped to 3 through 0.
+                                badICMask |= (1 << (3 - (x % 4)));
+                            }
+                        }
+
+                        // Make a comma-separated list of IC names from this list
+                        QString icList;
+                        bool first = true;
+                        for (int x = 0; x < 4; x++)
+                        {
+                            if (badICMask & (1 << x))
+                            {
+                                if (first)
+                                {
+                                    // not IC0 through IC3; IC1 through IC4.
+                                    // that's why I add one.
+                                    icList.append(QString("IC%1").arg(x+1));
+                                    first = false;
+                                }
+                                else
+                                {
+                                    icList.append(QString(", IC%1").arg(x+1));
+                                }
+                            }
+                        }
+
+                        QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it. Bad data on chips: " + icList);
                     }
                     else
                     {
@@ -419,7 +478,7 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
                 }
                 else
                 {
-                    QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it.");
+                    QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it--wrong amount of data read back.");
                 }
             }
 
