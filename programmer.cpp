@@ -27,6 +27,7 @@ typedef enum ProgrammerCommandState
     WaitingForNextCommand = 0,
 
     WriteSIMMWaitingSetSizeReply,
+    WriteSIMMWaitingSetVerifyModeReply,
     WriteSIMMWaitingEraseReply,
     WriteSIMMWaitingWriteReply,
     WriteSIMMWaitingFinishReply,
@@ -82,7 +83,9 @@ typedef enum ProgrammerCommand
     EnterProgrammer,
     BootloaderEraseAndWriteProgram,
     SetSIMMTypePLCC32_2MB,
-    SetSIMMTypeLarger
+    SetSIMMTypeLarger,
+    SetVerifyWhileWriting,
+    SetNoVerifyWhileWriting
 } ProgrammerCommand;
 
 typedef enum ProgrammerReply
@@ -118,7 +121,8 @@ typedef enum ProgrammerWriteReply
 {
     ProgrammerWriteOK,
     ProgrammerWriteError,
-    ProgrammerWriteConfirmCancel
+    ProgrammerWriteConfirmCancel,
+    ProgrammerWriteVerificationError = 0x80 /* high bit */
 } ProgrammerWriteReply;
 
 typedef enum ProgrammerIdentifyReply
@@ -173,6 +177,11 @@ static QString programmerBoardPortName;
 Programmer::Programmer(QObject *parent) :
     QObject(parent)
 {
+    _verifyMode = VerifyAfterWrite;
+    _verifyBadChipMask = 0;
+    verifyArray = new QByteArray();
+    verifyBuffer = new QBuffer(verifyArray);
+    verifyBuffer->open(QBuffer::ReadWrite);
     serialPort = new QextSerialPort(QextSerialPort::EventDriven);
     connect(serialPort, SIGNAL(readyRead()), SLOT(dataReady()));
 }
@@ -181,9 +190,19 @@ Programmer::~Programmer()
 {
     closePort();
     delete serialPort;
+    verifyBuffer->close();
+    delete verifyBuffer;
+    delete verifyArray;
 }
 
 void Programmer::readSIMM(QIODevice *device, uint32_t len)
+{
+    // We're not verifying in this case
+    isReadVerifying = false;
+    internalReadSIMM(device, len);
+}
+
+void Programmer::internalReadSIMM(QIODevice *device, uint32_t len)
 {
     readDevice = device;
     lenRead = 0;
@@ -268,17 +287,27 @@ void Programmer::handleChar(uint8_t c)
     case WaitingForNextCommand:
         // Not expecting anything. Ignore it.
         break;
+
+    // Expecting reply after we told the programmer the size of SIMM to expect
     case WriteSIMMWaitingSetSizeReply:
         switch (c)
         {
         case CommandReplyOK:
-            // If we got an OK reply, we're ready to go, so start...
+            // If we got an OK reply, we're good to go. Next, check for the
+            // "verify while writing" capability if needed...
 
-            // Special case: Send out notification we are starting an erase command.
-            // I don't have any hooks into the process between now and the erase reply.
-            emit writeStatusChanged(WriteErasing);
-            sendByte(EraseChips);
-            curState = WriteSIMMWaitingEraseReply;
+            uint8_t verifyCommand;
+            if (verifyMode() == VerifyWhileWriting)
+            {
+                verifyCommand = SetVerifyWhileWriting;
+            }
+            else
+            {
+                verifyCommand = SetNoVerifyWhileWriting;
+            }
+
+            curState = WriteSIMMWaitingSetVerifyModeReply;
+            sendByte(verifyCommand);
             break;
         case CommandReplyInvalid:
         case CommandReplyError:
@@ -293,7 +322,7 @@ void Programmer::handleChar(uint8_t c)
                 qDebug() << "Programmer board needs firmware update.";
                 curState = WaitingForNextCommand;
                 closePort();
-                emit writeStatusChanged(WriteNeedsFirmwareUpdate);
+                emit writeStatusChanged(WriteNeedsFirmwareUpdateBiggerSIMM);
             }
             else
             {
@@ -301,6 +330,61 @@ void Programmer::handleChar(uint8_t c)
                 // doesn't need updating -- it just didn't know how to handle
                 // the "set size" command. But that's OK -- it only supports
                 // the size we requested, so nothing's wrong.
+
+                // So...check for the "verify while writing" capability if needed.
+                uint8_t verifyCommand;
+                if (verifyMode() == VerifyWhileWriting)
+                {
+                    verifyCommand = SetVerifyWhileWriting;
+                }
+                else
+                {
+                    verifyCommand = SetNoVerifyWhileWriting;
+                }
+
+                curState = WriteSIMMWaitingSetVerifyModeReply;
+                sendByte(verifyCommand);
+            }
+            break;
+        }
+
+        break;
+
+    // Expecting reply from programmer after we told it to verify during write
+    // (or not to verify during write)
+    case WriteSIMMWaitingSetVerifyModeReply:
+        switch (c)
+        {
+        case CommandReplyOK:
+            // If we got an OK reply, we're ready to go, so start...
+
+            // Special case: Send out notification we are starting an erase command.
+            // I don't have any hooks into the process between now and the erase reply.
+            emit writeStatusChanged(WriteErasing);
+            sendByte(EraseChips);
+            curState = WriteSIMMWaitingEraseReply;
+            break;
+        case CommandReplyInvalid:
+        case CommandReplyError:
+            // If we got an error reply, we MAY still be OK unless we were
+            // asking to verify while writing, in which case the firmware
+            // doesn't support verify during write so the user needs to know.
+            if (verifyMode() == VerifyWhileWriting)
+            {
+                // Uh oh -- this is an old firmware that doesn't support verify
+                // while write. Let the caller know that the programmer board
+                // needs a firmware update.
+                qDebug() << "Programmer board needs firmware update.";
+                curState = WaitingForNextCommand;
+                closePort();
+                emit writeStatusChanged(WriteNeedsFirmwareUpdateVerifyWhileWrite);
+            }
+            else
+            {
+                // Error reply, but we're not trying to verify while writing, so
+                // the firmware doesn't need updating -- it just didn't know how to handle
+                // the "set verify mode" command. But that's OK -- we don't need
+                // that command if we're not verifying while writing.
                 // Special case: Send out notification we are starting an erase command.
                 // I don't have any hooks into the process between now and the erase reply.
                 emit writeStatusChanged(WriteErasing);
@@ -311,6 +395,8 @@ void Programmer::handleChar(uint8_t c)
         }
 
         break;
+
+    // Expecting reply from programmer after we told it to erase the chip
     case WriteSIMMWaitingEraseReply:
     {
         switch (c)
@@ -332,33 +418,52 @@ void Programmer::handleChar(uint8_t c)
         }
         break;
     }
+
+    // Expecting reply from programmer after we sent a chunk of data to write
+    // (or after we first told it we're going to start writing)
     case WriteSIMMWaitingWriteReply:
-        switch (c)
+
+        // This is a special case in the protocol for efficiency.
+        if (c & ProgrammerWriteVerificationError)
         {
-        case CommandReplyOK:
-            // We're in write SIMM mode. Now ask to start writing
-            if (writeLenRemaining > 0)
-            {
-                sendByte(ComputerWriteMore);
-                curState = WriteSIMMWaitingWriteMoreReply;
-                qDebug() << "Write more..." << writeLenRemaining << "remaining.";
-            }
-            else
-            {
-                sendByte(ComputerWriteFinish);
-                curState = WriteSIMMWaitingFinishReply;
-                qDebug() << "Finished writing. Sending write finish command...";
-            }
-            break;
-        case CommandReplyError:
-            qDebug() << "Error entering write mode.";
+            _verifyBadChipMask = c & ~ProgrammerWriteVerificationError;
+            qDebug() << "Verification error during write.";
             curState = WaitingForNextCommand;
             closePort();
-            emit writeStatusChanged(WriteError);
+            emit writeStatusChanged(WriteVerificationFailure);
             break;
+        }
+        else
+        {
+            switch (c)
+            {
+            case CommandReplyOK:
+                // We're in write SIMM mode. Now ask to start writing
+                if (writeLenRemaining > 0)
+                {
+                    sendByte(ComputerWriteMore);
+                    curState = WriteSIMMWaitingWriteMoreReply;
+                    qDebug() << "Write more..." << writeLenRemaining << "remaining.";
+                }
+                else
+                {
+                    sendByte(ComputerWriteFinish);
+                    curState = WriteSIMMWaitingFinishReply;
+                    qDebug() << "Finished writing. Sending write finish command...";
+                }
+                break;
+            case CommandReplyError:
+                qDebug() << "Error entering write mode.";
+                curState = WaitingForNextCommand;
+                closePort();
+                emit writeStatusChanged(WriteError);
+                break;
+            }
         }
 
         break;
+
+    // Expecting reply from programmer after we requested to write another data chunk
     case WriteSIMMWaitingWriteMoreReply:
     {
         switch (c)
@@ -405,14 +510,41 @@ void Programmer::handleChar(uint8_t c)
         }
         break;
     }
+
+    // Expecting reply from programmer after we told it we're done writing
     case WriteSIMMWaitingFinishReply:
         switch (c)
         {
         case ProgrammerWriteOK:
-            curState = WaitingForNextCommand;
-            qDebug() << "Write success at end";
-            closePort();
-            emit writeStatusChanged(WriteComplete);
+            if (verifyMode() == VerifyAfterWrite)
+            {
+                isReadVerifying = true;
+
+                // Ensure the verify buffer is empty
+                verifyArray->clear();
+                verifyBuffer->seek(0);
+
+                // Start reading from the SIMM now!
+                emit writeStatusChanged(WriteVerifying);
+                internalReadSIMM(verifyBuffer, writeDevice->size());
+            }
+            else
+            {
+                curState = WaitingForNextCommand;
+                qDebug() << "Write success at end";
+                closePort();
+
+                // Emit the correct signal based on how we finished
+                if (verifyMode() == NoVerification)
+                {
+                    emit writeStatusChanged(WriteCompleteNoVerify);
+                }
+                else
+                {
+                    emit writeStatusChanged(WriteCompleteVerifyOK);
+                }
+            }
+
             break;
         case ProgrammerWriteError:
         default:
@@ -427,6 +559,7 @@ void Programmer::handleChar(uint8_t c)
 
     // ELECTRICAL TEST STATE HANDLERS
 
+    // Expecting reply from programmer after we told it to run an electrical test
     case ElectricalTestWaitingStartReply:
         switch (c)
         {
@@ -443,6 +576,9 @@ void Programmer::handleChar(uint8_t c)
             emit electricalTestStatusChanged(ElectricalTestCouldntStart);
         }
         break;
+
+    // Expecting info from programmer about the electrical test in progress
+    // (Either that it's done or that it found a failure)
     case ElectricalTestWaitingNextStatus:
         switch (c)
         {
@@ -464,22 +600,33 @@ void Programmer::handleChar(uint8_t c)
             break;
         }
         break;
+    // Expecting electrical test fail location #1
     case ElectricalTestWaitingFirstFail:
         electricalTestFirstErrorLoc = c;
         curState = ElectricalTestWaitingSecondFail;
         break;
+    // Expecting electrical test fail location #2
     case ElectricalTestWaitingSecondFail:
         emit electricalTestFailLocation(electricalTestFirstErrorLoc, c);
         curState = ElectricalTestWaitingNextStatus;
         break;
 
     // READ SIMM STATE HANDLERS
+
+    // Expecting reply after we told the programmer to start reading
     case ReadSIMMWaitingStartReply:
         switch (c)
         {
         case CommandReplyOK:
 
-            emit readStatusChanged(ReadStarting);
+            if (!isReadVerifying)
+            {
+                emit readStatusChanged(ReadStarting);
+            }
+            else
+            {
+                emit writeStatusChanged(WriteVerifyStarting);
+            }
             curState = ReadSIMMWaitingLengthReply;
 
             // Send the length requesting to be read
@@ -495,28 +642,59 @@ void Programmer::handleChar(uint8_t c)
         default:
             curState = WaitingForNextCommand;
             closePort();
-            emit readStatusChanged(ReadError);
+            if (!isReadVerifying)
+            {
+                emit readStatusChanged(ReadError);
+            }
+            else
+            {
+                // Ensure the verify buffer is empty if we were verifying
+                verifyArray->clear();
+                verifyBuffer->seek(0);
+                emit writeStatusChanged(WriteVerifyError);
+            }
             break;
         }
         break;
 
+    // Expecting reply after we gave the programmer a length to read
     case ReadSIMMWaitingLengthReply:
         switch (c)
         {
         case ProgrammerReadOK:
             curState = ReadSIMMWaitingData;
-            emit readTotalLengthChanged(lenRemaining);
-            emit readCompletionLengthChanged(0);
+            if (!isReadVerifying)
+            {
+                emit readTotalLengthChanged(lenRemaining);
+                emit readCompletionLengthChanged(0);
+            }
+            else
+            {
+                emit writeVerifyTotalLengthChanged(lenRemaining);
+                emit writeVerifyCompletionLengthChanged(0);
+            }
             readChunkLenRemaining = READ_CHUNK_SIZE;
             break;
         case ProgrammerReadError:
         default:
             curState = WaitingForNextCommand;
             closePort();
-            emit readStatusChanged(ReadError);
+            if (!isReadVerifying)
+            {
+                emit readStatusChanged(ReadError);
+            }
+            else
+            {
+                // Ensure the verify buffer is empty if we were verifying
+                verifyArray->clear();
+                verifyBuffer->seek(0);
+                emit writeStatusChanged(WriteVerifyError);
+            }
             break;
         }
         break;
+
+    // Expecting a chunk of data back from the programmer
     case ReadSIMMWaitingData:
         // Only keep adding to the readback if we need to
         if (lenRead < trueLenToRead)
@@ -527,24 +705,51 @@ void Programmer::handleChar(uint8_t c)
         lenRead++;
         if (--readChunkLenRemaining == 0)
         {
-            emit readCompletionLengthChanged(lenRead);
+            if (!isReadVerifying)
+            {
+                emit readCompletionLengthChanged(lenRead);
+            }
+            else
+            {
+                emit writeVerifyCompletionLengthChanged(lenRead);
+            }
             qDebug() << "Received a chunk of data";
             sendByte(ComputerReadOK);
             curState = ReadSIMMWaitingStatusReply;
         }
         break;
+
+    // Expecting status reply from programmer after we confirmed reception of
+    // previous chunk of data
     case ReadSIMMWaitingStatusReply:
         switch (c)
         {
         case ProgrammerReadFinished:
             curState = WaitingForNextCommand;
             closePort();
-            emit readStatusChanged(ReadComplete);
+            if (!isReadVerifying)
+            {
+                emit readStatusChanged(ReadComplete);
+            }
+            else
+            {
+                doVerifyAfterWriteCompare();
+            }
             break;
         case ProgrammerReadConfirmCancel:
             curState = WaitingForNextCommand;
             closePort();
-            emit readStatusChanged(ReadCancelled);
+            if (!isReadVerifying)
+            {
+                emit readStatusChanged(ReadCancelled);
+            }
+            else
+            {
+                // Ensure the verify buffer is empty if we were verifying
+                verifyArray->clear();
+                verifyBuffer->seek(0);
+                emit writeStatusChanged(WriteVerifyCancelled);
+            }
             break;
         case ProgrammerReadMoreData:
             curState = ReadSIMMWaitingData;
@@ -555,6 +760,9 @@ void Programmer::handleChar(uint8_t c)
         break;
 
     // BOOTLOADER STATE HANDLERS
+
+    // Expecting reply after we asked for bootloader state (original request is
+    // to end up in programmer mode)
     case BootloaderStateAwaitingOKReply:
         if (c == CommandReplyOK)
         {
@@ -568,17 +776,14 @@ void Programmer::handleChar(uint8_t c)
             // TODO: Error out somehow
         }
         break;
+
+    // Expecting bootloader state after request was confirmed (original request
+    // is to end up in programmer mode)
     case BootloaderStateAwaitingReply:
         switch (c)
         {
         case BootloaderStateInBootloader:
             // Oops! We're in the bootloader. Better change over to the programmer.
-            // TODO: Send "enter programmer" command.
-            //       Close serial port.
-            //       Wait for serial port to reappear (or just wait a fixed time?)
-            //       Open serial port.
-            //       Ensure we're in the programmer?
-            //       Then do the command correctly
             qDebug() << "We're in the bootloader, so sending an \"enter programmer\" request.";
             emit startStatusChanged(ProgrammerInitializing);
             sendByte(EnterProgrammer);
@@ -600,6 +805,8 @@ void Programmer::handleChar(uint8_t c)
         }
         break;
 
+    // Expecting reply after we asked for bootloader state (original request is
+    // to end up in bootloader mode)
     case BootloaderStateAwaitingOKReplyToBootloader:
         if (c == CommandReplyOK)
         {
@@ -613,17 +820,14 @@ void Programmer::handleChar(uint8_t c)
             // TODO: Error out somehow
         }
         break;
+
+    // Expecting bootloader state after request was confirmed (original request
+    // is to end up in bootloader mode)
     case BootloaderStateAwaitingReplyToBootloader:
         switch (c)
         {
         case BootloaderStateInProgrammer:
             // Oops! We're in the programmer. Better change over to the bootloader.
-            // TODO: Send "enter bootloader" command.
-            //       Close serial port.
-            //       Wait for serial port to reappear (or just wait a fixed time?)
-            //       Open serial port.
-            //       Ensure we're in the bootloader?
-            //       Then do the command correctly
             qDebug() << "We're in the programmer, so sending an \"enter bootloader\" request.";
             emit startStatusChanged(ProgrammerInitializing);
             sendByte(EnterBootloader);
@@ -646,6 +850,8 @@ void Programmer::handleChar(uint8_t c)
         break;
 
     // IDENTIFICATION STATE HANDLERS
+
+    // // Expecting reply after we told the programmer what size of SIMM to use
     case IdentificationWaitingSetSizeReply:
         switch (c)
         {
@@ -681,6 +887,8 @@ void Programmer::handleChar(uint8_t c)
             break;
         }
         break;
+
+    // Expecting reply after we asked to identify chips
     case IdentificationAwaitingOKReply:
         if (c == CommandReplyOK)
         {
@@ -697,6 +905,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
         }
         break;
+
+    // Expecting device/manufacturer info about the chips
     case IdentificationWaitingData:
         if (identificationCounter & 1) // device ID?
         {
@@ -713,6 +923,8 @@ void Programmer::handleChar(uint8_t c)
             curState = IdentificationAwaitingDoneReply;
         }
         break;
+
+    // Expecting final done confirmation after receiving all device/manufacturer info
     case IdentificationAwaitingDoneReply:
         curState = WaitingForNextCommand;
         closePort();
@@ -727,6 +939,8 @@ void Programmer::handleChar(uint8_t c)
         break;
 
     // WRITE BOOTLOADER PROGRAM STATE HANDLERS
+
+    // Expecting reply after we asked to flash the firmware
     case BootloaderEraseProgramAwaitingStartOKReply:
         if (c == CommandReplyOK)
         {
@@ -742,6 +956,8 @@ void Programmer::handleChar(uint8_t c)
             emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
+
+    // Expecting reply after we told bootloader we're done flashing firmware
     case BootloaderEraseProgramWaitingFinishReply:
         if (c == BootloaderWriteOK)
         {
@@ -758,6 +974,8 @@ void Programmer::handleChar(uint8_t c)
             emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
+
+    // Expecting reply after we asked to write more firmware data
     case BootloaderEraseProgramWaitingWriteMoreReply:
         if (c == BootloaderWriteOK)
         {
@@ -797,6 +1015,8 @@ void Programmer::handleChar(uint8_t c)
             emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
+
+    // Expecting reply after we sent a chunk of firmware data
     case BootloaderEraseProgramWaitingWriteReply:
         if (c == CommandReplyOK)
         {
@@ -1086,7 +1306,78 @@ void Programmer::setSIMMCapacity(uint32_t bytes)
     _simmCapacity = bytes;
 }
 
-uint32_t Programmer::SIMMCapacity()
+uint32_t Programmer::SIMMCapacity() const
 {
     return _simmCapacity;
+}
+
+void Programmer::setVerifyMode(VerificationOption mode)
+{
+    _verifyMode = mode;
+}
+
+VerificationOption Programmer::verifyMode() const
+{
+    return _verifyMode;
+}
+
+void Programmer::doVerifyAfterWriteCompare()
+{
+    // Do the comparison, emit the correct signal
+
+    // Read the entire file we just wrote into a QByteArray
+    writeDevice->seek(0);
+    QByteArray originalFileContents = writeDevice->readAll();
+
+    WriteStatus emitStatus;
+
+    // Now, compare the readback (but only for the length of originalFileContents
+    // (because the readback might be longer since it has to be a multiple of
+    // READ_CHUNK_SIZE)
+    if (originalFileContents.size() <= verifyArray->size())
+    {
+        const char *fileBytesPtr = originalFileContents.constData();
+        const char *readBytesPtr = verifyArray->constData();
+
+        if (memcmp(fileBytesPtr, readBytesPtr, originalFileContents.size()) != 0)
+        {
+            // Now let's do some trickery and figure out which chip is acting up (or chips)
+            _verifyBadChipMask = 0;
+
+            // Keep a list of which chips are reading bad data back
+            for (int x = 0; (x < originalFileContents.size()) && (_verifyBadChipMask != 0xF); x++)
+            {
+                if (fileBytesPtr[x] != readBytesPtr[x])
+                {
+                    // OK, we found a mismatched byte. Now look at
+                    // which byte (0-3) it is in each 4-byte group.
+                    // If it's byte 0, it's the MOST significant byte
+                    // because the 68k is big endian. IC4 contains the
+                    // MSB, so IC4 is the first chip, IC3 second, and
+                    // so on. That's why I subtract it from 3 --
+                    // 0 through 3 get mapped to 3 through 0.
+                    _verifyBadChipMask |= (1 << (3 - (x % 4)));
+                }
+            }
+
+            emitStatus = WriteVerificationFailure;
+        }
+        else
+        {
+            emitStatus = WriteCompleteVerifyOK;
+        }
+    }
+    else
+    {
+        // Wrong amount of data read back for some reason...shouldn't ever happen,
+        // but I'll call it a verification failure.
+        emitStatus = WriteVerificationFailure;
+    }
+
+    // Reset verification buffer to emptiness
+    verifyArray->clear();
+    verifyBuffer->seek(0);
+
+    // Finally, emit the final status signal
+    emit writeStatusChanged(emitStatus);
 }

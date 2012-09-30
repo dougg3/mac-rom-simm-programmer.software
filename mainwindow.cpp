@@ -30,6 +30,7 @@ static Programmer *p;
 
 #define selectedCapacityKey     "selectedCapacity"
 #define verifyAfterWriteKey     "verifyAfterWrite"
+#define verifyWhileWritingKey   "verifyWhileWriting"
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -64,8 +65,35 @@ MainWindow::MainWindow(QWidget *parent) :
         ui->simmCapacityBox->setCurrentIndex(selectedIndex);
     }
 
-    // Decide whether or not to verify after write
-    ui->verifyAfterWriteBox->setChecked(settings.value(verifyAfterWriteKey, true).toBool());
+    // Fill in the list of verification options
+    ui->verifyBox->addItem("Don't verify", QVariant(NoVerification));
+    ui->verifyBox->addItem("Verify while writing", QVariant(VerifyWhileWriting));
+    ui->verifyBox->addItem("Verify after writing", QVariant(VerifyAfterWrite));
+
+    // Decide whether to verify while writing, after writing, or never.
+    // This would probably be better suited as an enum rather than multiple bools,
+    // but I started out with it as a single bool, so for backward compatibility,
+    // I simply added another bool for the "verify while writing" capability.
+    bool verifyAfterWrite = settings.value(verifyAfterWriteKey, false).toBool();
+    bool verifyWhileWriting = settings.value(verifyWhileWritingKey, true).toBool();
+    selectedIndex = 0;
+    if (verifyWhileWriting)
+    {
+        selectedIndex = ui->verifyBox->findData(VerifyWhileWriting);
+    }
+    else if (verifyAfterWrite)
+    {
+        selectedIndex = ui->verifyBox->findData(VerifyAfterWrite);
+    }
+    else
+    {
+        selectedIndex = ui->verifyBox->findData(NoVerification);
+    }
+
+    if (selectedIndex != -1)
+    {
+        ui->verifyBox->setCurrentIndex(selectedIndex);
+    }
 
     ui->chosenWriteFile->setText("");
     ui->chosenReadFile->setText("");
@@ -79,12 +107,12 @@ MainWindow::MainWindow(QWidget *parent) :
 
     readFile = NULL;
     writeFile = NULL;
-    verifyArray = NULL;
-    verifyBuffer = NULL;
 
     connect(p, SIGNAL(writeStatusChanged(WriteStatus)), SLOT(programmerWriteStatusChanged(WriteStatus)));
     connect(p, SIGNAL(writeTotalLengthChanged(uint32_t)), SLOT(programmerWriteTotalLengthChanged(uint32_t)));
     connect(p, SIGNAL(writeCompletionLengthChanged(uint32_t)), SLOT(programmerWriteCompletionLengthChanged(uint32_t)));
+    connect(p, SIGNAL(writeVerifyTotalLengthChanged(uint32_t)), SLOT(programmerVerifyTotalLengthChanged(uint32_t)));
+    connect(p, SIGNAL(writeVerifyCompletionLengthChanged(uint32_t)), SLOT(programmerVerifyCompletionLengthChanged(uint32_t)));
     connect(p, SIGNAL(electricalTestStatusChanged(ElectricalTestStatus)), SLOT(programmerElectricalTestStatusChanged(ElectricalTestStatus)));
     connect(p, SIGNAL(electricalTestFailLocation(uint8_t,uint8_t)), SLOT(programmerElectricalTestLocation(uint8_t,uint8_t)));
     connect(p, SIGNAL(readStatusChanged(ReadStatus)), SLOT(programmerReadStatusChanged(ReadStatus)));
@@ -132,8 +160,6 @@ void MainWindow::on_selectReadFileButton_clicked()
 
 void MainWindow::on_readFromSIMMButton_clicked()
 {
-    // We are not doing a verify after a write..
-    readVerifying = false;
     if (readFile)
     {
         readFile->close();
@@ -223,7 +249,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
     case WriteErasing:
         ui->statusLabel->setText("Erasing SIMM (this may take a few seconds)...");
         break;
-    case WriteComplete:
+    case WriteCompleteNoVerify:
         if (writeFile)
         {
             writeFile->close();
@@ -231,53 +257,70 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
             writeFile = NULL;
         }
 
-        if (ui->verifyAfterWriteBox->isChecked())
+        QMessageBox::information(this, "Write complete", "The write operation finished.");
+        ui->pages->setCurrentWidget(ui->controlPage);
+        break;
+    case WriteCompleteVerifyOK:
+        if (writeFile)
         {
-            // Set up the read buffers
-            readVerifying = true;
-            if (verifyArray) delete verifyArray;
-            verifyArray = new QByteArray((int)p->SIMMCapacity(), 0);
-            if (verifyBuffer) delete verifyBuffer;
-            verifyBuffer = new QBuffer(verifyArray);
-            if (!verifyBuffer->open(QBuffer::ReadWrite))
-            {
-                delete verifyBuffer;
-                delete verifyArray;
-                verifyBuffer = NULL;
-                verifyArray = NULL;
-                programmerReadStatusChanged(ReadError);
-                return;
-            }
-
-            // Start reading from SIMM to temporary RAM buffer
-            resetAndShowStatusPage();
-
-            // Only read back the size of the file if we can. This will save
-            // some time and prevent us from needing to read the ENTIRE SIMM
-            // if the file is only a quarter of the size of the SIMM.
-            uint32_t readLen = 0;
-            QFile temp(ui->chosenWriteFile->text());
-            if (temp.exists())
-            {
-                qint64 tmpLen = temp.size();
-                if (tmpLen > 0)
-                {
-                    readLen = static_cast<uint32_t>(tmpLen);
-                }
-                else
-                {
-                    readLen = 0;
-                }
-            }
-
-            p->readSIMM(verifyBuffer, readLen);
-            qDebug() << "Reading from SIMM for verification...";
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
         }
-        else
+
+        QMessageBox::information(this, "Write complete", "The write operation finished, and the contents were verified successfully.");
+        ui->pages->setCurrentWidget(ui->controlPage);
+        break;
+
+    case WriteVerifying:
+        resetAndShowStatusPage();
+        break;
+    case WriteVerifyStarting:
+        ui->statusLabel->setText("Verifying SIMM contents...");
+        break;
+    case WriteVerifyError:
+        if (writeFile)
         {
-            QMessageBox::information(this, "Write complete", "The write operation finished.");
-            ui->pages->setCurrentWidget(ui->controlPage);
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
         }
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "Verify error", "An error occurred reading the SIMM contents for verification.");
+        break;
+    case WriteVerifyCancelled:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "Verify cancelled", "The verify operation was cancelled.");
+        break;
+    case WriteVerifyTimedOut:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "Verify timed out", "The verify operation timed out.");
+        break;
+    case WriteVerificationFailure:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
+        // The verify failure code is somewhat complicated so it's best to put
+        // it elsewhere.
+        handleVerifyFailureReply();
         break;
     case WriteError:
         if (writeFile)
@@ -290,7 +333,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Write error", "An error occurred writing to the SIMM.");
         break;
-    case WriteNeedsFirmwareUpdate:
+    case WriteNeedsFirmwareUpdateBiggerSIMM:
         if (writeFile)
         {
             writeFile->close();
@@ -300,6 +343,17 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
 
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
+        break;
+    case WriteNeedsFirmwareUpdateVerifyWhileWrite:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support the \"verify while writing\" capability. Please update the firmware and try again.");
         break;
     case WriteCancelled:
         if (writeFile)
@@ -361,7 +415,15 @@ void MainWindow::programmerWriteCompletionLengthChanged(uint32_t len)
     ui->progressBar->setValue((int)len);
 }
 
+void MainWindow::programmerVerifyTotalLengthChanged(uint32_t totalLen)
+{
+    ui->progressBar->setMaximum((int)totalLen);
+}
 
+void MainWindow::programmerVerifyCompletionLengthChanged(uint32_t len)
+{
+    ui->progressBar->setValue((int)len);
+}
 
 void MainWindow::on_electricalTestButton_clicked()
 {
@@ -415,200 +477,51 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
     switch (newStatus)
     {
     case ReadStarting:
-        if (readVerifying)
-        {
-            ui->statusLabel->setText("Verifying SIMM contents...");
-        }
-        else
-        {
-            ui->statusLabel->setText("Reading SIMM contents...");
-        }
+        ui->statusLabel->setText("Reading SIMM contents...");
         break;
     case ReadComplete:
-        if (readVerifying)
+        if (readFile)
         {
-            // Re-open the write file temporarily to compare it against the buffer.
-            QFile temp(ui->chosenWriteFile->text());
-            if (!temp.open(QFile::ReadOnly))
-            {
-                QMessageBox::warning(this, "Verify failed", "Unable to open file for verification.");
-            }
-            else
-            {
-                QByteArray fileBytes = temp.readAll();
-
-                if (fileBytes.count() <= verifyArray->count())
-                {
-                    const char *fileBytesPtr = fileBytes.constData();
-                    const char *readBytesPtr = verifyArray->constData();
-
-                    if (memcmp(fileBytesPtr, readBytesPtr, fileBytes.count()) != 0)
-                    {
-                        // Now let's do some trickery and figure out which chip is acting up (or chips)
-                        uint8_t badICMask = 0;
-
-                        // Keep a list of which chips are reading bad data back
-                        for (int x = 0; (x < fileBytes.count()) && (badICMask != 0xF); x++)
-                        {
-                            if (fileBytesPtr[x] != readBytesPtr[x])
-                            {
-                                // OK, we found a mismatched byte. Now look at
-                                // which byte (0-3) it is in each 4-byte group.
-                                // If it's byte 0, it's the MOST significant byte
-                                // because the 68k is big endian. IC4 contains the
-                                // MSB, so IC4 is the first chip, IC3 second, and
-                                // so on. That's why I subtract it from 3 --
-                                // 0 through 3 get mapped to 3 through 0.
-                                badICMask |= (1 << (3 - (x % 4)));
-                            }
-                        }
-
-                        // Make a comma-separated list of IC names from this list
-                        QString icList;
-                        bool first = true;
-                        for (int x = 0; x < 4; x++)
-                        {
-                            if (badICMask & (1 << x))
-                            {
-                                if (first)
-                                {
-                                    // not IC0 through IC3; IC1 through IC4.
-                                    // that's why I add one.
-                                    icList.append(QString("IC%1").arg(x+1));
-                                    first = false;
-                                }
-                                else
-                                {
-                                    icList.append(QString(", IC%1").arg(x+1));
-                                }
-                            }
-                        }
-
-                        QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it. Bad data on chips: " + icList);
-                    }
-                    else
-                    {
-                        QMessageBox::information(this, "Write complete", "The write operation finished, and the contents were verified successfully.");
-                    }
-                }
-                else
-                {
-                    QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it--wrong amount of data read back.");
-                }
-            }
-
-            // Close stuff not needed anymore
-            if (verifyBuffer)
-            {
-                verifyBuffer->close();
-                delete verifyBuffer;
-                verifyBuffer = NULL;
-            }
-
-            if (verifyArray)
-            {
-                delete verifyArray;
-                verifyArray = NULL;
-            }
-
-            ui->pages->setCurrentWidget(ui->controlPage);
+            readFile->close();
+            delete readFile;
+            readFile = NULL;
         }
-        else
-        {
-            if (readFile)
-            {
-                readFile->close();
-                delete readFile;
-                readFile = NULL;
-            }
 
-            ui->pages->setCurrentWidget(ui->controlPage);
-            QMessageBox::information(this, "Read complete", "The read operation finished.");
-        }
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::information(this, "Read complete", "The read operation finished.");
         break;
     case ReadError:
-        if (readVerifying)
+        if (readFile)
         {
-            if (verifyBuffer)
-            {
-                verifyBuffer->close();
-                delete verifyBuffer;
-            }
-            verifyBuffer = NULL;
-            if (verifyArray) delete verifyArray;
-            verifyArray = NULL;
-
-            ui->pages->setCurrentWidget(ui->controlPage);
-            QMessageBox::warning(this, "Verify error", "An error occurred reading the SIMM contents for verification.");
+            readFile->close();
+            delete readFile;
+            readFile = NULL;
         }
-        else
-        {
-            if (readFile)
-            {
-                readFile->close();
-                delete readFile;
-                readFile = NULL;
-            }
 
-            ui->pages->setCurrentWidget(ui->controlPage);
-            QMessageBox::warning(this, "Read error", "An error occurred reading from the SIMM.");
-        }
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "Read error", "An error occurred reading from the SIMM.");
         break;
     case ReadCancelled:
-        if (readVerifying)
+        if (readFile)
         {
-            if (verifyBuffer)
-            {
-                verifyBuffer->close();
-                delete verifyBuffer;
-            }
-            verifyBuffer = NULL;
-            if (verifyArray) delete verifyArray;
-            verifyArray = NULL;
-
-            ui->pages->setCurrentWidget(ui->controlPage);
-            QMessageBox::warning(this, "Verify cancelled", "The verify operation was cancelled.");
+            readFile->close();
+            delete readFile;
+            readFile = NULL;
         }
-        else
-        {
-            if (readFile)
-            {
-                readFile->close();
-                delete readFile;
-                readFile = NULL;
-            }
 
-            ui->pages->setCurrentWidget(ui->controlPage);
-            QMessageBox::warning(this, "Read cancelled", "The read operation was cancelled.");
-        }
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "Read cancelled", "The read operation was cancelled.");
         break;
     case ReadTimedOut:
-        if (readVerifying)
+        if (readFile)
         {
-            if (verifyBuffer)
-            {
-                verifyBuffer->close();
-                delete verifyBuffer;
-            }
-            verifyBuffer = NULL;
-            if (verifyArray) delete verifyArray;
-            verifyArray = NULL;
-
-            ui->pages->setCurrentWidget(ui->controlPage);
-            QMessageBox::warning(this, "Verify timed out", "The verify operation timed out.");
+            readFile->close();
+            delete readFile;
+            readFile = NULL;
         }
-        else
-        {
-            if (readFile)
-            {
-                readFile->close();
-                delete readFile;
-                readFile = NULL;
-            }
 
-            ui->pages->setCurrentWidget(ui->controlPage);
-            QMessageBox::warning(this, "Read timed out", "The read operation timed out.");
-        }
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "Read timed out", "The read operation timed out.");
         break;
     }
 }
@@ -758,7 +671,7 @@ void MainWindow::resetAndShowStatusPage()
 
 void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
 {
-    uint32_t newCapacity = (uint32_t)ui->simmCapacityBox->itemData(index).toUInt();
+    uint32_t newCapacity = static_cast<uint32_t>(ui->simmCapacityBox->itemData(index).toUInt());
     p->setSIMMCapacity(newCapacity);
     QSettings settings;
     if (!initializing)
@@ -769,14 +682,66 @@ void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
     }
 }
 
-void MainWindow::on_verifyAfterWriteBox_toggled(bool checked)
+void MainWindow::on_verifyBox_currentIndexChanged(int index)
 {
+    if (index < 0) return;
+
+    VerificationOption vo = static_cast<VerificationOption>(ui->verifyBox->itemData(index).toUInt());
+
     // Save this as the new default.
     QSettings settings;
-    settings.setValue(verifyAfterWriteKey, checked);
+
+    p->setVerifyMode(vo);
+
+    if (!initializing)
+    {
+        if (vo == NoVerification)
+        {
+            settings.setValue(verifyAfterWriteKey, false);
+            settings.setValue(verifyWhileWritingKey, false);
+        }
+        else if (vo == VerifyAfterWrite)
+        {
+            settings.setValue(verifyAfterWriteKey, true);
+            settings.setValue(verifyWhileWritingKey, false);
+        }
+        else if (vo == VerifyWhileWriting)
+        {
+            settings.setValue(verifyAfterWriteKey, false);
+            settings.setValue(verifyWhileWritingKey, true);
+        }
+    }
 }
 
 void MainWindow::on_actionAbout_SIMM_Programmer_triggered()
 {
     AboutBox::instance()->show();
+}
+
+void MainWindow::handleVerifyFailureReply()
+{
+    // Make a comma-separated list of IC names from this list
+    uint8_t badICMask = p->verifyBadChipMask();
+    QString icList;
+    bool first = true;
+    for (int x = 0; x < 4; x++)
+    {
+        if (badICMask & (1 << x))
+        {
+            if (first)
+            {
+                // not IC0 through IC3; IC1 through IC4.
+                // that's why I add one.
+                icList.append(QString("IC%1").arg(x+1));
+                first = false;
+            }
+            else
+            {
+                icList.append(QString(", IC%1").arg(x+1));
+            }
+        }
+    }
+
+    ui->pages->setCurrentWidget(ui->controlPage);
+    QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it. Bad data on chips: " + icList);
 }

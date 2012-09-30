@@ -22,8 +22,6 @@
 
 #include <QMainWindow>
 #include <QFile>
-#include <QBuffer>
-#include <QByteArray>
 #include "programmer.h"
 
 namespace Ui {
@@ -51,6 +49,9 @@ private slots:
     void programmerWriteStatusChanged(WriteStatus newStatus);
     void programmerWriteTotalLengthChanged(uint32_t totalLen);
     void programmerWriteCompletionLengthChanged(uint32_t len);
+
+    void programmerVerifyTotalLengthChanged(uint32_t totalLen);
+    void programmerVerifyCompletionLengthChanged(uint32_t len);
 
     void programmerElectricalTestStatusChanged(ElectricalTestStatus newStatus);
     void programmerElectricalTestLocation(uint8_t loc1, uint8_t loc2);
@@ -80,7 +81,7 @@ private slots:
 
     void on_actionAbout_SIMM_Programmer_triggered();
 
-    void on_verifyAfterWriteBox_toggled(bool checked);
+    void on_verifyBox_currentIndexChanged(int index);
 
 private:
     Ui::MainWindow *ui;
@@ -89,12 +90,10 @@ private:
     bool readFileValid;
     QFile *writeFile;
     QFile *readFile;
-    QBuffer *verifyBuffer;
-    QByteArray *verifyArray;
     QString electricalTestString;
-    bool readVerifying;
 
     void resetAndShowStatusPage();
+    void handleVerifyFailureReply();
 };
 
 #endif // MAINWINDOW_H

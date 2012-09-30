@@ -26,6 +26,7 @@
 #include <qextserialport.h>
 #include <qextserialenumerator.h>
 #include <stdint.h>
+#include <QBuffer>
 
 typedef enum StartStatus
 {
@@ -45,14 +46,22 @@ typedef enum ReadStatus
 typedef enum WriteStatus
 {
     WriteErasing,
-    WriteComplete,
+    WriteCompleteNoVerify,
     WriteError,
     WriteCancelled,
     WriteEraseComplete,
     WriteEraseFailed,
     WriteTimedOut,
     WriteFileTooBig,
-    WriteNeedsFirmwareUpdate
+    WriteNeedsFirmwareUpdateBiggerSIMM,
+    WriteNeedsFirmwareUpdateVerifyWhileWrite,
+    WriteVerifying,
+    WriteVerificationFailure,
+    WriteVerifyStarting,
+    WriteVerifyError,
+    WriteVerifyCancelled,
+    WriteVerifyTimedOut,
+    WriteCompleteVerifyOK
 } WriteStatus;
 
 typedef enum ElectricalTestStatus
@@ -82,6 +91,14 @@ typedef enum FirmwareFlashStatus
     FirmwareFlashTimedOut
 } FirmwareFlashStatus;
 
+// Various choices for verification
+typedef enum VerificationOption
+{
+    NoVerification,
+    VerifyWhileWriting,
+    VerifyAfterWrite
+} VerificationOption;
+
 // Electrical test indexes
 #define GROUND_FAIL_INDEX					0xFF
 
@@ -108,7 +125,10 @@ public:
     void flashFirmware(QString filename);
     void startCheckingPorts();
     void setSIMMCapacity(uint32_t bytes);
-    uint32_t SIMMCapacity();
+    uint32_t SIMMCapacity() const;
+    void setVerifyMode(VerificationOption mode);
+    VerificationOption verifyMode() const;
+    uint8_t verifyBadChipMask() const { return _verifyBadChipMask; }
 signals:
     void startStatusChanged(StartStatus status);
 
@@ -119,6 +139,8 @@ signals:
     void writeStatusChanged(WriteStatus status);
     void writeTotalLengthChanged(uint32_t total);
     void writeCompletionLengthChanged(uint32_t len);
+    void writeVerifyTotalLengthChanged(uint32_t total);
+    void writeVerifyCompletionLengthChanged(uint32_t total);
 
     void electricalTestStatusChanged(ElectricalTestStatus status);
     void electricalTestFailLocation(uint8_t loc1, uint8_t loc2);
@@ -164,11 +186,19 @@ private:
     uint32_t firmwareLenRemaining;
     uint32_t firmwareLenWritten;
 
+    VerificationOption _verifyMode;
+    uint8_t _verifyBadChipMask;
+    bool isReadVerifying;
+    QBuffer *verifyBuffer;
+    QByteArray *verifyArray;
+
     void openPort();
     void closePort();
 
+    void internalReadSIMM(QIODevice *device, uint32_t len);
     void startProgrammerCommand(uint8_t commandByte, uint32_t newState);
     void startBootloaderCommand(uint8_t commandByte, uint32_t newState);
+    void doVerifyAfterWriteCompare();
 
 private slots:
     void dataReady();
