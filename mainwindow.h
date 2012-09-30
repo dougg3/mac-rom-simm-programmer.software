@@ -46,6 +46,7 @@ private slots:
     void on_readFromSIMMButton_clicked();
 
     void on_chosenWriteFile_textEdited(const QString &newText);
+    void on_chosenReadFile_textEdited(const QString &newText);
 
     void programmerWriteStatusChanged(WriteStatus newStatus);
     void programmerWriteTotalLengthChanged(uint32_t totalLen);

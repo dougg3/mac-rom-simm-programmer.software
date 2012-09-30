@@ -189,7 +189,7 @@ void MainWindow::on_writeToSIMMButton_clicked()
 void MainWindow::on_chosenWriteFile_textEdited(const QString &newText)
 {
     QFileInfo fi(newText);
-    if (fi.exists() && fi.isFile())
+    if (!newText.isEmpty() && fi.exists() && fi.isFile())
     {
         ui->writeToSIMMButton->setEnabled(true);
         writeFileValid = true;
@@ -198,6 +198,21 @@ void MainWindow::on_chosenWriteFile_textEdited(const QString &newText)
     {
         ui->writeToSIMMButton->setEnabled(false);
         writeFileValid = false;
+    }
+}
+
+void MainWindow::on_chosenReadFile_textEdited(const QString &newText)
+{
+    QFileInfo fi(newText);
+    if (!newText.isEmpty() && fi.dir().exists())
+    {
+        ui->readFromSIMMButton->setEnabled(true);
+        readFileValid = true;
+    }
+    else
+    {
+        ui->readFromSIMMButton->setEnabled(false);
+        readFileValid = false;
     }
 }
 
