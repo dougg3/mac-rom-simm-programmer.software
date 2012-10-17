@@ -85,6 +85,9 @@
               <widget class="QComboBox" name="verifyBox"/>
              </item>
              <item>
+              <widget class="QComboBox" name="howMuchToWriteBox"/>
+             </item>
+             <item>
               <spacer name="horizontalSpacer_2">
                <property name="orientation">
                 <enum>Qt::Horizontal</enum>

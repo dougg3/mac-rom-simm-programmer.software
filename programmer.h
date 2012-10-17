@@ -61,7 +61,9 @@ typedef enum WriteStatus
     WriteVerifyError,
     WriteVerifyCancelled,
     WriteVerifyTimedOut,
-    WriteCompleteVerifyOK
+    WriteCompleteVerifyOK,
+    WriteEraseBlockWrongSize,
+    WriteNeedsFirmwareUpdateErasePortion
 } WriteStatus;
 
 typedef enum ElectricalTestStatus
@@ -118,6 +120,7 @@ public:
     virtual ~Programmer();
     void readSIMM(QIODevice *device, uint32_t len = 0);
     void writeToSIMM(QIODevice *device);
+    void writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t length);
     void runElectricalTest();
     QString electricalTestPinName(uint8_t index);
     void identifySIMMChips();
@@ -165,6 +168,7 @@ private:
 
     QextSerialPort *serialPort;
     void sendByte(uint8_t b);
+    void sendWord(uint32_t w);
     uint8_t readByte();
     void handleChar(uint8_t c);
     uint32_t _simmCapacity;
@@ -191,6 +195,9 @@ private:
     bool isReadVerifying;
     QBuffer *verifyBuffer;
     QByteArray *verifyArray;
+
+    uint32_t writeOffset;
+    uint32_t writeLength;
 
     void openPort();
     void closePort();

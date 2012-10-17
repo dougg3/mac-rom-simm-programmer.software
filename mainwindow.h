@@ -83,6 +83,8 @@ private slots:
 
     void on_verifyBox_currentIndexChanged(int index);
 
+    void on_howMuchToWriteBox_currentIndexChanged(int index);
+
 private:
     Ui::MainWindow *ui;
     bool initializing;

@@ -60,7 +60,13 @@ typedef enum ProgrammerCommandState
     BootloaderEraseProgramAwaitingStartOKReply,
     BootloaderEraseProgramWaitingFinishReply,
     BootloaderEraseProgramWaitingWriteMoreReply,
-    BootloaderEraseProgramWaitingWriteReply
+    BootloaderEraseProgramWaitingWriteReply,
+
+    WritePortionWaitingSetSizeReply,
+    WritePortionWaitingSetVerifyModeReply,
+    WritePortionWaitingEraseReply,
+    WritePortionWaitingEraseConfirmation,
+    WritePortionWaitingEraseResult
 } ProgrammerCommandState;
 
 typedef enum ProgrammerBoardFoundState
@@ -85,7 +91,8 @@ typedef enum ProgrammerCommand
     SetSIMMTypePLCC32_2MB,
     SetSIMMTypeLarger,
     SetVerifyWhileWriting,
-    SetNoVerifyWhileWriting
+    SetNoVerifyWhileWriting,
+    ErasePortion
 } ProgrammerCommand;
 
 typedef enum ProgrammerReply
@@ -156,6 +163,13 @@ typedef enum ComputerBootloaderEraseWriteRequest
     ComputerBootloaderCancel
 } ComputerBootloaderEraseWriteRequest;
 
+typedef enum ProgrammerErasePortionOfChipReply
+{
+    ProgrammerErasePortionOK = 0,
+    ProgrammerErasePortionError,
+    ProgrammerErasePortionFinished
+} ProgrammerErasePortionOfChipReply;
+
 #define PROGRAMMER_USB_VENDOR_ID            0x16D0
 #define PROGRAMMER_USB_DEVICE_ID            0x06AA
 
@@ -163,6 +177,8 @@ typedef enum ComputerBootloaderEraseWriteRequest
 #define WRITE_CHUNK_SIZE    1024
 #define READ_CHUNK_SIZE     1024
 #define FIRMWARE_CHUNK_SIZE 1024
+
+#define BLOCK_ERASE_SIZE    (256*1024UL)
 
 static ProgrammerCommandState curState = WaitingForNextCommand;
 
@@ -259,9 +275,55 @@ void Programmer::writeToSIMM(QIODevice *device)
     }
 }
 
+void Programmer::writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t length)
+{
+    writeDevice = device;
+    if ((writeDevice->size() > SIMMCapacity()) ||
+         (startOffset + length > SIMMCapacity()))
+    {
+        curState = WaitingForNextCommand;
+        emit writeStatusChanged(WriteFileTooBig);
+        return;
+    }
+    else if ((startOffset % BLOCK_ERASE_SIZE) || (length % BLOCK_ERASE_SIZE))
+    {
+        curState = WaitingForNextCommand;
+        emit writeStatusChanged(WriteEraseBlockWrongSize);
+        return;
+    }
+    else
+    {
+        lenWritten = 0;
+        writeLenRemaining = length;
+        device->seek(startOffset);
+        writeOffset = startOffset;
+        writeLength = length;
+
+        // Based on the SIMM size, tell the programmer board.
+        uint8_t setSizeCommand;
+        if (SIMMCapacity() > 2*1024*1024)
+        {
+            setSizeCommand = SetSIMMTypeLarger;
+        }
+        else
+        {
+            setSizeCommand = SetSIMMTypePLCC32_2MB;
+        }
+        startProgrammerCommand(setSizeCommand, WritePortionWaitingSetSizeReply);
+    }
+}
+
 void Programmer::sendByte(uint8_t b)
 {
     serialPort->write((const char *)&b, 1);
+}
+
+void Programmer::sendWord(uint32_t w)
+{
+    sendByte((w >> 0)  & 0xFF);
+    sendByte((w >> 8)  & 0xFF);
+    sendByte((w >> 16) & 0xFF);
+    sendByte((w >> 24) & 0xFF);
 }
 
 uint8_t Programmer::readByte()
@@ -290,6 +352,7 @@ void Programmer::handleChar(uint8_t c)
 
     // Expecting reply after we told the programmer the size of SIMM to expect
     case WriteSIMMWaitingSetSizeReply:
+    case WritePortionWaitingSetSizeReply:
         switch (c)
         {
         case CommandReplyOK:
@@ -306,7 +369,14 @@ void Programmer::handleChar(uint8_t c)
                 verifyCommand = SetNoVerifyWhileWriting;
             }
 
-            curState = WriteSIMMWaitingSetVerifyModeReply;
+            if (curState == WriteSIMMWaitingSetSizeReply)
+            {
+                curState = WriteSIMMWaitingSetVerifyModeReply;
+            }
+            else if (curState == WritePortionWaitingSetSizeReply)
+            {
+                curState = WritePortionWaitingSetVerifyModeReply;
+            }
             sendByte(verifyCommand);
             break;
         case CommandReplyInvalid:
@@ -342,7 +412,14 @@ void Programmer::handleChar(uint8_t c)
                     verifyCommand = SetNoVerifyWhileWriting;
                 }
 
-                curState = WriteSIMMWaitingSetVerifyModeReply;
+                if (curState == WriteSIMMWaitingSetSizeReply)
+                {
+                    curState = WriteSIMMWaitingSetVerifyModeReply;
+                }
+                else if (curState == WritePortionWaitingSetSizeReply)
+                {
+                    curState = WritePortionWaitingSetVerifyModeReply;
+                }
                 sendByte(verifyCommand);
             }
             break;
@@ -353,6 +430,7 @@ void Programmer::handleChar(uint8_t c)
     // Expecting reply from programmer after we told it to verify during write
     // (or not to verify during write)
     case WriteSIMMWaitingSetVerifyModeReply:
+    case WritePortionWaitingSetVerifyModeReply:
         switch (c)
         {
         case CommandReplyOK:
@@ -361,8 +439,16 @@ void Programmer::handleChar(uint8_t c)
             // Special case: Send out notification we are starting an erase command.
             // I don't have any hooks into the process between now and the erase reply.
             emit writeStatusChanged(WriteErasing);
-            sendByte(EraseChips);
-            curState = WriteSIMMWaitingEraseReply;
+            if (curState == WriteSIMMWaitingSetVerifyModeReply)
+            {
+                sendByte(EraseChips);
+                curState = WriteSIMMWaitingEraseReply;
+            }
+            else if (curState == WritePortionWaitingSetVerifyModeReply)
+            {
+                sendByte(ErasePortion);
+                curState = WritePortionWaitingEraseReply;
+            }
             break;
         case CommandReplyInvalid:
         case CommandReplyError:
@@ -388,8 +474,16 @@ void Programmer::handleChar(uint8_t c)
                 // Special case: Send out notification we are starting an erase command.
                 // I don't have any hooks into the process between now and the erase reply.
                 emit writeStatusChanged(WriteErasing);
-                sendByte(EraseChips);
-                curState = WriteSIMMWaitingEraseReply;
+                if (curState == WriteSIMMWaitingSetVerifyModeReply)
+                {
+                    sendByte(EraseChips);
+                    curState = WriteSIMMWaitingEraseReply;
+                }
+                else if (curState == WritePortionWaitingSetVerifyModeReply)
+                {
+                    sendByte(ErasePortion);
+                    curState = WritePortionWaitingEraseReply;
+                }
             }
             break;
         }
@@ -416,6 +510,73 @@ void Programmer::handleChar(uint8_t c)
             emit writeStatusChanged(WriteEraseFailed);
             break;
         }
+        break;
+    }
+
+    case WritePortionWaitingEraseReply:
+    {
+        switch (c)
+        {
+        case CommandReplyOK:
+            sendWord(writeOffset);
+            sendWord(writeLength);
+            qDebug("Sending %u, %u", writeOffset, writeLength);
+            curState = WritePortionWaitingEraseConfirmation;
+            qDebug() << "Sent erase positions, waiting for reply...";
+            break;
+        case CommandReplyError:
+            // Uh oh -- this is an old firmware that doesn't support verify
+            // while write. Let the caller know that the programmer board
+            // needs a firmware update.
+            qDebug() << "Programmer board needs firmware update.";
+            curState = WaitingForNextCommand;
+            closePort();
+            emit writeStatusChanged(WriteNeedsFirmwareUpdateErasePortion);
+            break;
+        }
+        break;
+    }
+
+    case WritePortionWaitingEraseConfirmation:
+    {
+        switch (c)
+        {
+        case ProgrammerErasePortionOK:
+            curState = WritePortionWaitingEraseResult;
+            break;
+        case ProgrammerErasePortionError:
+            // Programmer didn't like the position/length we gave it
+            qDebug() << "Programmer didn't like erase pos/length.";
+            curState = WaitingForNextCommand;
+            closePort();
+            emit writeStatusChanged(WriteEraseFailed);
+            break;
+        }
+
+        break;
+    }
+
+    case WritePortionWaitingEraseResult:
+    {
+        switch (c)
+        {
+        case ProgrammerErasePortionFinished:
+            // we're done erasing, now it's time to write the data
+            // starting at where we wanted to flash to
+            // TODO HERE IS WHERE I LEFT OFF
+            curState = WaitingForNextCommand;
+            closePort();
+            emit writeStatusChanged(WriteCompleteNoVerify);
+            break;
+        case ProgrammerErasePortionError:
+            // Programmer failed to erase
+            qDebug() << "Programmer had error erasing.";
+            curState = WaitingForNextCommand;
+            closePort();
+            emit writeStatusChanged(WriteEraseFailed);
+            break;
+        }
+
         break;
     }
 
@@ -630,10 +791,7 @@ void Programmer::handleChar(uint8_t c)
             curState = ReadSIMMWaitingLengthReply;
 
             // Send the length requesting to be read
-            sendByte((lenRemaining >> 0)  & 0xFF);
-            sendByte((lenRemaining >> 8)  & 0xFF);
-            sendByte((lenRemaining >> 16) & 0xFF);
-            sendByte((lenRemaining >> 24) & 0xFF);
+            sendWord(lenRemaining);
 
             // Now wait for the go-ahead from the programmer's side
             break;

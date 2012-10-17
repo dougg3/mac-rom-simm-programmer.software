@@ -31,6 +31,7 @@ static Programmer *p;
 #define selectedCapacityKey     "selectedCapacity"
 #define verifyAfterWriteKey     "verifyAfterWrite"
 #define verifyWhileWritingKey   "verifyWhileWriting"
+#define selectedEraseSizeKey    "selectedEraseSize"
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -93,6 +94,22 @@ MainWindow::MainWindow(QWidget *parent) :
     if (selectedIndex != -1)
     {
         ui->verifyBox->setCurrentIndex(selectedIndex);
+    }
+
+    // Fill in list of "write first xxx bytes" options
+    ui->howMuchToWriteBox->addItem("Erase/write entire SIMM", QVariant(0));
+    ui->howMuchToWriteBox->addItem("Only erase/write first 256 KB", QVariant(256*1024));
+    ui->howMuchToWriteBox->addItem("Only erase/write first 512 KB", QVariant(512*1024));
+    ui->howMuchToWriteBox->addItem("Only erase/write first 1 MB", QVariant(1024*1024));
+    ui->howMuchToWriteBox->addItem("Only erase/write first 1.5 MB", QVariant(3*512*1024));
+    ui->howMuchToWriteBox->addItem("Only erase/write first 2 MB", QVariant(2*1024*1024));
+
+    // Select "erase entire SIMM" by default, or load last-used setting
+    QVariant selectedEraseSize = settings.value(selectedEraseSizeKey, QVariant(0));
+    selectedIndex = ui->howMuchToWriteBox->findData(selectedEraseSize);
+    if (selectedIndex != -1)
+    {
+        ui->howMuchToWriteBox->setCurrentIndex(selectedIndex);
     }
 
     ui->chosenWriteFile->setText("");
@@ -203,7 +220,16 @@ void MainWindow::on_writeToSIMMButton_clicked()
             return;
         }
         resetAndShowStatusPage();
-        p->writeToSIMM(writeFile);
+
+        uint howMuchToErase = ui->howMuchToWriteBox->itemData(ui->howMuchToWriteBox->currentIndex()).toUInt();
+        if (howMuchToErase == 0)
+        {
+            p->writeToSIMM(writeFile);
+        }
+        else
+        {
+            p->writeToSIMM(writeFile, 0, howMuchToErase);
+        }
         qDebug() << "Writing to SIMM...";
     }
     else
@@ -401,6 +427,17 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
 
         ui->pages->setCurrentWidget(ui->controlPage);
         QMessageBox::warning(this, "File too big", "The file you chose to write to the SIMM is too big according to the chip size you have selected.");
+        break;
+    case WriteEraseBlockWrongSize:
+        if (writeFile)
+        {
+            writeFile->close();
+            delete writeFile;
+            writeFile = NULL;
+        }
+
+        ui->pages->setCurrentWidget(ui->controlPage);
+        QMessageBox::warning(this, "Bad erase size", "The programmer cannot handle the erase size you chose.");
         break;
     }
 }
@@ -710,6 +747,21 @@ void MainWindow::on_verifyBox_currentIndexChanged(int index)
             settings.setValue(verifyAfterWriteKey, false);
             settings.setValue(verifyWhileWritingKey, true);
         }
+    }
+}
+
+void MainWindow::on_howMuchToWriteBox_currentIndexChanged(int index)
+{
+    if (index < 0) return;
+
+    uint32_t newEraseSize = static_cast<uint32_t>(ui->howMuchToWriteBox->itemData(index).toUInt());
+
+    QSettings settings;
+    if (!initializing)
+    {
+        // If we're not initializing (it gets called while we're initializing),
+        // go ahead and save this as the new default.
+        settings.setValue(selectedEraseSizeKey, newEraseSize);
     }
 }
 
