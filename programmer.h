@@ -182,6 +182,7 @@ private:
     uint32_t lenRead;
     uint32_t trueLenToRead;
     uint32_t lenRemaining;
+    uint32_t readOffset;
 
     int identificationCounter;
     uint8_t chipManufacturerIDs[4];
@@ -195,6 +196,7 @@ private:
     bool isReadVerifying;
     QBuffer *verifyBuffer;
     QByteArray *verifyArray;
+    uint32_t verifyLength;
 
     uint32_t writeOffset;
     uint32_t writeLength;
@@ -202,7 +204,7 @@ private:
     void openPort();
     void closePort();
 
-    void internalReadSIMM(QIODevice *device, uint32_t len);
+    void internalReadSIMM(QIODevice *device, uint32_t len, uint32_t offset = 0);
     void startProgrammerCommand(uint8_t commandByte, uint32_t newState);
     void startBootloaderCommand(uint8_t commandByte, uint32_t newState);
     void doVerifyAfterWriteCompare();

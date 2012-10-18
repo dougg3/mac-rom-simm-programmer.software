@@ -39,6 +39,7 @@ typedef enum ProgrammerCommandState
     ElectricalTestWaitingSecondFail,
 
     ReadSIMMWaitingStartReply,
+    ReadSIMMWaitingStartOffsetReply,
     ReadSIMMWaitingLengthReply,
     ReadSIMMWaitingData,
     ReadSIMMWaitingStatusReply,
@@ -66,7 +67,8 @@ typedef enum ProgrammerCommandState
     WritePortionWaitingSetVerifyModeReply,
     WritePortionWaitingEraseReply,
     WritePortionWaitingEraseConfirmation,
-    WritePortionWaitingEraseResult
+    WritePortionWaitingEraseResult,
+    WritePortionWaitingWriteAtReply
 } ProgrammerCommandState;
 
 typedef enum ProgrammerBoardFoundState
@@ -92,7 +94,9 @@ typedef enum ProgrammerCommand
     SetSIMMTypeLarger,
     SetVerifyWhileWriting,
     SetNoVerifyWhileWriting,
-    ErasePortion
+    ErasePortion,
+    WriteChipsAt,
+    ReadChipsAt
 } ProgrammerCommand;
 
 typedef enum ProgrammerReply
@@ -218,10 +222,11 @@ void Programmer::readSIMM(QIODevice *device, uint32_t len)
     internalReadSIMM(device, len);
 }
 
-void Programmer::internalReadSIMM(QIODevice *device, uint32_t len)
+void Programmer::internalReadSIMM(QIODevice *device, uint32_t len, uint32_t offset)
 {
     readDevice = device;
     lenRead = 0;
+    readOffset = offset;
 
     // Len == 0 means read the entire SIMM
     if (len == 0)
@@ -244,7 +249,14 @@ void Programmer::internalReadSIMM(QIODevice *device, uint32_t len)
         trueLenToRead = len;
     }
 
-    startProgrammerCommand(ReadChips, ReadSIMMWaitingStartReply);
+    if (offset > 0)
+    {
+        startProgrammerCommand(ReadChipsAt, ReadSIMMWaitingStartOffsetReply);
+    }
+    else
+    {
+        startProgrammerCommand(ReadChips, ReadSIMMWaitingStartReply);
+    }
 }
 
 void Programmer::writeToSIMM(QIODevice *device)
@@ -260,6 +272,7 @@ void Programmer::writeToSIMM(QIODevice *device)
     {
         lenWritten = 0;
         writeLenRemaining = writeDevice->size();
+        writeOffset = 0;
 
         // Based on the SIMM size, tell the programmer board.
         uint8_t setSizeCommand;
@@ -294,7 +307,11 @@ void Programmer::writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t l
     else
     {
         lenWritten = 0;
-        writeLenRemaining = length;
+        writeLenRemaining = writeDevice->size() - startOffset;
+        if (writeLenRemaining > length)
+        {
+            writeLenRemaining = length;
+        }
         device->seek(startOffset);
         writeOffset = startOffset;
         writeLength = length;
@@ -563,10 +580,10 @@ void Programmer::handleChar(uint8_t c)
         case ProgrammerErasePortionFinished:
             // we're done erasing, now it's time to write the data
             // starting at where we wanted to flash to
-            // TODO HERE IS WHERE I LEFT OFF
-            curState = WaitingForNextCommand;
-            closePort();
-            emit writeStatusChanged(WriteCompleteNoVerify);
+            sendByte(WriteChipsAt);
+            curState = WritePortionWaitingWriteAtReply;
+            qDebug() << "Chips partially erased. Now asking to start writing...";
+            emit writeStatusChanged(WriteEraseComplete);
             break;
         case ProgrammerErasePortionError:
             // Programmer failed to erase
@@ -580,10 +597,35 @@ void Programmer::handleChar(uint8_t c)
         break;
     }
 
+    case WritePortionWaitingWriteAtReply:
+    {
+        switch (c)
+        {
+        case CommandReplyOK:
+            sendWord(writeOffset);
+            qDebug() << "Sending" << writeOffset;
+            curState = WriteSIMMWaitingWriteReply;
+            emit writeTotalLengthChanged(writeLenRemaining);
+            emit writeCompletionLengthChanged(lenWritten);
+            qDebug() << "Partial write command accepted, sending offset...";
+            break;
+        case CommandReplyError:
+        case CommandReplyInvalid:
+        default:
+            // Programmer failed to erase
+            qDebug() << "Programmer didn't accept 'write at' command.";
+            curState = WaitingForNextCommand;
+            closePort();
+            emit writeStatusChanged(WriteError);
+            break;
+        }
+
+        break;
+    }
+
     // Expecting reply from programmer after we sent a chunk of data to write
     // (or after we first told it we're going to start writing)
     case WriteSIMMWaitingWriteReply:
-
         // This is a special case in the protocol for efficiency.
         if (c & ProgrammerWriteVerificationError)
         {
@@ -627,6 +669,7 @@ void Programmer::handleChar(uint8_t c)
     // Expecting reply from programmer after we requested to write another data chunk
     case WriteSIMMWaitingWriteMoreReply:
     {
+        qDebug() << "Write more reply:" << c;
         switch (c)
         {
         case ProgrammerWriteOK:
@@ -684,6 +727,7 @@ void Programmer::handleChar(uint8_t c)
                 // Ensure the verify buffer is empty
                 verifyArray->clear();
                 verifyBuffer->seek(0);
+                verifyLength = lenWritten;
 
                 // Start reading from the SIMM now!
                 emit writeStatusChanged(WriteVerifying);
@@ -774,8 +818,9 @@ void Programmer::handleChar(uint8_t c)
 
     // READ SIMM STATE HANDLERS
 
-    // Expecting reply after we told the programmer to start reading
+    // Expecting reply after we told the programmer to start reading       
     case ReadSIMMWaitingStartReply:
+    case ReadSIMMWaitingStartOffsetReply:
         switch (c)
         {
         case CommandReplyOK:
@@ -788,9 +833,14 @@ void Programmer::handleChar(uint8_t c)
             {
                 emit writeStatusChanged(WriteVerifyStarting);
             }
+
             curState = ReadSIMMWaitingLengthReply;
 
-            // Send the length requesting to be read
+            // Send the length requesting to be read (and offset if needed)
+            if (c == ReadSIMMWaitingStartOffsetReply)
+            {
+                sendWord(readOffset);
+            }
             sendWord(lenRemaining);
 
             // Now wait for the go-ahead from the programmer's side
@@ -1484,8 +1534,9 @@ void Programmer::doVerifyAfterWriteCompare()
     // Do the comparison, emit the correct signal
 
     // Read the entire file we just wrote into a QByteArray
-    writeDevice->seek(0);
-    QByteArray originalFileContents = writeDevice->readAll();
+    writeDevice->seek(readOffset);
+    QByteArray originalFileContents = writeDevice->read(verifyLength);
+    qDebug() << "Read" << originalFileContents.length() << "bytes, asked for" << verifyLength;
 
     WriteStatus emitStatus;
 
