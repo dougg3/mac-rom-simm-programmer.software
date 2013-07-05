@@ -29,3 +29,8 @@ QMAKE_CXXFLAGS_RELEASE += -DQT_NO_DEBUG_OUTPUT
 
 macx:CONFIG += x86
 macx:CONFIG += x86_64
+
+OTHER_FILES += \
+    SIMMProgrammer.rc
+
+RC_FILE = SIMMProgrammer.rc
