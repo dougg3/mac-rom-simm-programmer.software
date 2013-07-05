@@ -34,3 +34,5 @@ OTHER_FILES += \
     SIMMProgrammer.rc
 
 RC_FILE = SIMMProgrammer.rc
+
+ICON = SIMMProgrammer.icns
