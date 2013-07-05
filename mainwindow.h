@@ -85,6 +85,17 @@ private slots:
 
     void on_howMuchToWriteBox_currentIndexChanged(int index);
 
+    void on_flashIndividualEnterButton_clicked();
+    void on_returnNormalButton_clicked();
+
+    void updateFlashIndividualControlsEnabled();
+    void selectIndividualWriteFileClicked();
+    void selectIndividualReadFileClicked();
+
+    void on_multiFlashChipsButton_clicked();
+    void on_multiReadChipsButton_clicked();
+    void finishMultiRead();
+
 private:
     Ui::MainWindow *ui;
     bool initializing;
@@ -93,9 +104,16 @@ private:
     QFile *writeFile;
     QFile *readFile;
     QString electricalTestString;
+    QBuffer *writeBuffer;
+    QBuffer *readBuffer;
 
     void resetAndShowStatusPage();
     void handleVerifyFailureReply();
+
+    void hideFlashIndividualControls();
+    void showFlashIndividualControls();
+
+    void returnToControlPage();
 };
 
 #endif // MAINWINDOW_H

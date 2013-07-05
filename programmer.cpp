@@ -28,6 +28,8 @@ typedef enum ProgrammerCommandState
 
     WriteSIMMWaitingSetSizeReply,
     WriteSIMMWaitingSetVerifyModeReply,
+    WriteSIMMWaitingSetChipMaskReply,
+    WriteSIMMWaitingSetChipMaskValueReply,
     WriteSIMMWaitingEraseReply,
     WriteSIMMWaitingWriteReply,
     WriteSIMMWaitingFinishReply,
@@ -65,6 +67,8 @@ typedef enum ProgrammerCommandState
 
     WritePortionWaitingSetSizeReply,
     WritePortionWaitingSetVerifyModeReply,
+    WritePortionWaitingSetChipMaskReply,
+    WritePortionWaitingSetChipMaskValueReply,
     WritePortionWaitingEraseReply,
     WritePortionWaitingEraseConfirmation,
     WritePortionWaitingEraseResult,
@@ -96,7 +100,8 @@ typedef enum ProgrammerCommand
     SetNoVerifyWhileWriting,
     ErasePortion,
     WriteChipsAt,
-    ReadChipsAt
+    ReadChipsAt,
+    SetChipsMask
 } ProgrammerCommand;
 
 typedef enum ProgrammerReply
@@ -259,9 +264,10 @@ void Programmer::internalReadSIMM(QIODevice *device, uint32_t len, uint32_t offs
     }
 }
 
-void Programmer::writeToSIMM(QIODevice *device)
+void Programmer::writeToSIMM(QIODevice *device, uint8_t chipsMask)
 {
     writeDevice = device;
+    writeChipMask = chipsMask;
     if (writeDevice->size() > SIMMCapacity())
     {
         curState = WaitingForNextCommand;
@@ -288,9 +294,10 @@ void Programmer::writeToSIMM(QIODevice *device)
     }
 }
 
-void Programmer::writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t length)
+void Programmer::writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t length, uint8_t chipsMask)
 {
     writeDevice = device;
+    writeChipMask = chipsMask;
     if ((writeDevice->size() > SIMMCapacity()) ||
          (startOffset + length > SIMMCapacity()))
     {
@@ -451,20 +458,16 @@ void Programmer::handleChar(uint8_t c)
         switch (c)
         {
         case CommandReplyOK:
-            // If we got an OK reply, we're ready to go, so start...
-
-            // Special case: Send out notification we are starting an erase command.
-            // I don't have any hooks into the process between now and the erase reply.
-            emit writeStatusChanged(WriteErasing);
+            // If we got an OK reply, we're good. Now try to set the chip mask.
             if (curState == WriteSIMMWaitingSetVerifyModeReply)
             {
-                sendByte(EraseChips);
-                curState = WriteSIMMWaitingEraseReply;
+                sendByte(SetChipsMask);
+                curState = WriteSIMMWaitingSetChipMaskReply;
             }
             else if (curState == WritePortionWaitingSetVerifyModeReply)
             {
-                sendByte(ErasePortion);
-                curState = WritePortionWaitingEraseReply;
+                sendByte(SetChipsMask);
+                curState = WritePortionWaitingSetChipMaskReply;
             }
             break;
         case CommandReplyInvalid:
@@ -488,20 +491,104 @@ void Programmer::handleChar(uint8_t c)
                 // the firmware doesn't need updating -- it just didn't know how to handle
                 // the "set verify mode" command. But that's OK -- we don't need
                 // that command if we're not verifying while writing.
+
+                // So move onto the next thing to try.
+                if (curState == WriteSIMMWaitingSetVerifyModeReply)
+                {
+                    sendByte(SetChipsMask);
+                    curState = WriteSIMMWaitingSetChipMaskReply;
+                }
+                else if (curState == WritePortionWaitingSetVerifyModeReply)
+                {
+                    sendByte(SetChipsMask);
+                    curState = WritePortionWaitingSetChipMaskReply;
+                }
+            }
+            break;
+        }
+
+        break;
+
+    case WriteSIMMWaitingSetChipMaskReply:
+    case WritePortionWaitingSetChipMaskReply:
+        switch (c)
+        {
+        case CommandReplyOK:
+            // OK, now we can send the chip mask and move onto the next state
+            sendByte(writeChipMask);
+            if (curState == WriteSIMMWaitingSetChipMaskReply)
+            {
+                curState = WriteSIMMWaitingSetChipMaskValueReply;
+            }
+            else if (curState == WritePortionWaitingSetChipMaskReply)
+            {
+                curState = WritePortionWaitingSetChipMaskValueReply;
+            }
+            break;
+        case CommandReplyInvalid:
+        case CommandReplyError:
+            // Error reply. If we're trying to set a mask of 0x0F, no error, it
+            // just means the firmware's out of date and doesn't support setting
+            // custom chip masks. Ignore and move on.
+            if (writeChipMask == 0x0F)
+            {
+                // OK, erase the SIMM and get the ball rolling.
                 // Special case: Send out notification we are starting an erase command.
                 // I don't have any hooks into the process between now and the erase reply.
                 emit writeStatusChanged(WriteErasing);
-                if (curState == WriteSIMMWaitingSetVerifyModeReply)
+                if (curState == WriteSIMMWaitingSetChipMaskReply)
                 {
                     sendByte(EraseChips);
                     curState = WriteSIMMWaitingEraseReply;
                 }
-                else if (curState == WritePortionWaitingSetVerifyModeReply)
+                else if (curState == WritePortionWaitingSetChipMaskReply)
                 {
                     sendByte(ErasePortion);
                     curState = WritePortionWaitingEraseReply;
                 }
             }
+            else
+            {
+                // Uh oh -- this is an old firmware that doesn't support custom
+                // chip masks. Let the caller know that the programmer board
+                // needs a firmware update.
+                qDebug() << "Programmer board needs firmware update.";
+                curState = WaitingForNextCommand;
+                closePort();
+                emit writeStatusChanged(WriteNeedsFirmwareUpdateIndividualChips);
+            }
+            break;
+        }
+
+        break;
+
+    case WriteSIMMWaitingSetChipMaskValueReply:
+    case WritePortionWaitingSetChipMaskValueReply:
+        switch (c)
+        {
+        case CommandReplyOK:
+            // OK, erase the SIMM and get the ball rolling.
+            // Special case: Send out notification we are starting an erase command.
+            // I don't have any hooks into the process between now and the erase reply.
+            emit writeStatusChanged(WriteErasing);
+            if (curState == WriteSIMMWaitingSetChipMaskValueReply)
+            {
+                sendByte(EraseChips);
+                curState = WriteSIMMWaitingEraseReply;
+            }
+            else if (curState == WritePortionWaitingSetChipMaskValueReply)
+            {
+                sendByte(ErasePortion);
+                curState = WritePortionWaitingEraseReply;
+            }
+            break;
+        case CommandReplyInvalid:
+        case CommandReplyError:
+            // Error after trying to set the value.
+            qDebug() << "Error reply setting chip mask.";
+            curState = WaitingForNextCommand;
+            closePort();
+            emit writeStatusChanged(WriteError);
             break;
         }
 
@@ -1569,7 +1656,23 @@ void Programmer::doVerifyAfterWriteCompare()
                 }
             }
 
-            emitStatus = WriteVerificationFailure;
+            // Now make sure we're not complaining about chips we didn't
+            // write to...this will zero out errors on chips we weren't
+            // flashing, but will leave errors intact for chips we did write.
+            // (the chip mask is backwards from the IC numbering...that's why
+            // I have to do this in a special way)
+            if ((writeChipMask & 0x01) == 0) _verifyBadChipMask &= ~0x08;
+            if ((writeChipMask & 0x02) == 0) _verifyBadChipMask &= ~0x04;
+            if ((writeChipMask & 0x04) == 0) _verifyBadChipMask &= ~0x02;
+            if ((writeChipMask & 0x08) == 0) _verifyBadChipMask &= ~0x01;
+            if (_verifyBadChipMask != 0)
+            {
+                emitStatus = WriteVerificationFailure;
+            }
+            else
+            {
+                emitStatus = WriteCompleteVerifyOK;
+            }
         }
         else
         {

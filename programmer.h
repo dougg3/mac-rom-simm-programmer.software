@@ -63,7 +63,8 @@ typedef enum WriteStatus
     WriteVerifyTimedOut,
     WriteCompleteVerifyOK,
     WriteEraseBlockWrongSize,
-    WriteNeedsFirmwareUpdateErasePortion
+    WriteNeedsFirmwareUpdateErasePortion,
+    WriteNeedsFirmwareUpdateIndividualChips
 } WriteStatus;
 
 typedef enum ElectricalTestStatus
@@ -119,8 +120,8 @@ public:
     explicit Programmer(QObject *parent = 0);
     virtual ~Programmer();
     void readSIMM(QIODevice *device, uint32_t len = 0);
-    void writeToSIMM(QIODevice *device);
-    void writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t length);
+    void writeToSIMM(QIODevice *device, uint8_t chipsMask = 0x0F);
+    void writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t length, uint8_t chipsMask = 0x0F);
     void runElectricalTest();
     QString electricalTestPinName(uint8_t index);
     void identifySIMMChips();
@@ -200,6 +201,7 @@ private:
 
     uint32_t writeOffset;
     uint32_t writeLength;
+    uint8_t writeChipMask;
 
     void openPort();
     void closePort();
