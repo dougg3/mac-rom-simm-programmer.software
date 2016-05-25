@@ -94,8 +94,8 @@ typedef enum ProgrammerCommand
     EnterBootloader,
     EnterProgrammer,
     BootloaderEraseAndWriteProgram,
-    SetSIMMTypePLCC32_2MB,
-    SetSIMMTypeLarger,
+    SetSIMMLayout_AddressStraight,
+    SetSIMMLayout_AddressShifted,
     SetVerifyWhileWriting,
     SetNoVerifyWhileWriting,
     ErasePortion,
@@ -281,16 +281,16 @@ void Programmer::writeToSIMM(QIODevice *device, uint8_t chipsMask)
         writeOffset = 0;
 
         // Based on the SIMM size, tell the programmer board.
-        uint8_t setSizeCommand;
-        if (SIMMCapacity() > 2*1024*1024)
+        uint8_t setLayoutCommand;
+        if (SIMMCapacity() > 4*1024*1024)
         {
-            setSizeCommand = SetSIMMTypeLarger;
+            setLayoutCommand = SetSIMMLayout_AddressShifted;
         }
         else
         {
-            setSizeCommand = SetSIMMTypePLCC32_2MB;
+            setLayoutCommand = SetSIMMLayout_AddressStraight;
         }
-        startProgrammerCommand(setSizeCommand, WriteSIMMWaitingSetSizeReply);
+        startProgrammerCommand(setLayoutCommand, WriteSIMMWaitingSetSizeReply);
     }
 }
 
@@ -324,16 +324,16 @@ void Programmer::writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t l
         writeLength = length;
 
         // Based on the SIMM size, tell the programmer board.
-        uint8_t setSizeCommand;
-        if (SIMMCapacity() > 2*1024*1024)
+        uint8_t setLayoutCommand;
+        if (SIMMCapacity() > 4*1024*1024)
         {
-            setSizeCommand = SetSIMMTypeLarger;
+            setLayoutCommand = SetSIMMLayout_AddressShifted;
         }
         else
         {
-            setSizeCommand = SetSIMMTypePLCC32_2MB;
+            setLayoutCommand = SetSIMMLayout_AddressStraight;
         }
-        startProgrammerCommand(setSizeCommand, WritePortionWaitingSetSizeReply);
+        startProgrammerCommand(setLayoutCommand, WritePortionWaitingSetSizeReply);
     }
 }
 
@@ -1406,16 +1406,16 @@ void Programmer::identifySIMMChips()
 {
     //startProgrammerCommand(IdentifyChips, IdentificationAwaitingOKReply);
     // Based on the SIMM size, tell the programmer board.
-    uint8_t setSizeCommand;
-    if (SIMMCapacity() > 2*1024*1024)
+    uint8_t setLayoutCommand;
+    if (SIMMCapacity() > 4*1024*1024)
     {
-        setSizeCommand = SetSIMMTypeLarger;
+        setLayoutCommand = SetSIMMLayout_AddressShifted;
     }
     else
     {
-        setSizeCommand = SetSIMMTypePLCC32_2MB;
+        setLayoutCommand = SetSIMMLayout_AddressStraight;
     }
-    startProgrammerCommand(setSizeCommand, IdentificationWaitingSetSizeReply);
+    startProgrammerCommand(setLayoutCommand, IdentificationWaitingSetSizeReply);
 }
 
 void Programmer::getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device)

@@ -55,13 +55,13 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->actionUpdate_firmware->setEnabled(false);
 
     // Fill in the list of SIMM chip capacities (programmer can support anywhere up to 8 MB of space)
-    ui->simmCapacityBox->addItem("32 KB (256 Kb) per chip * 4 chips = 128 KB", QVariant(128 * 1024));
-    ui->simmCapacityBox->addItem("64 KB (512 Kb) per chip * 4 chips = 256 KB", QVariant(256 * 1024));
-    ui->simmCapacityBox->addItem("128 KB (1 Mb) per chip * 4 chips = 512 KB", QVariant(512 * 1024));
-    ui->simmCapacityBox->addItem("256 KB (2 Mb) per chip * 4 chips = 1 MB", QVariant(1 * 1024 * 1024));
-    ui->simmCapacityBox->addItem("512 KB (4 Mb) per chip * 4 chips = 2 MB", QVariant(2 * 1024 * 1024));
-    ui->simmCapacityBox->addItem("1 MB (8 Mb) per chip * 4 chips = 4 MB", QVariant(4 * 1024 * 1024));
-    ui->simmCapacityBox->addItem("2 MB (16 Mb) per chip * 4 chips = 8 MB", QVariant(8 * 1024 * 1024));
+    ui->simmCapacityBox->addItem("128 KB (4 x 256Kb/chip)", QVariant(128 * 1024));
+    ui->simmCapacityBox->addItem("256 KB (4 x 512Kb/chip)", QVariant(256 * 1024));
+    ui->simmCapacityBox->addItem("512 KB (4 x 1Mb/chip)", QVariant(512 * 1024));
+    ui->simmCapacityBox->addItem("1 MB (4 x 2Mb/chip)", QVariant(1 * 1024 * 1024));
+    ui->simmCapacityBox->addItem("2 MB (4 x 4Mb/chip)", QVariant(2 * 1024 * 1024));
+    ui->simmCapacityBox->addItem("4 MB (2 x 16Mb/chip)", QVariant(4 * 1024 * 1024));
+    ui->simmCapacityBox->addItem("8 MB (4 x 16Mb/chip)", QVariant(8 * 1024 * 1024));
 
     // Select 2 MB by default (it's what most people will want), or load last-used setting
     QVariant selectedCapacity = settings.value(selectedCapacityKey, QVariant(2 * 1024 * 1024));
@@ -792,14 +792,32 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
     {
         ui->pages->setCurrentWidget(ui->controlPage);
         QString identifyString = "The chips identified themselves as:";
-        for (int x = 0; x < 4; x++)
+
+        // 4MB SIMM actually only has two chips
+        if (p->SIMMCapacity() == 4*1024*1024)
         {
-            QString thisString;
-            uint8_t manufacturer = 0;
-            uint8_t device = 0;
-            p->getChipIdentity(x, &manufacturer, &device);
-            thisString.sprintf("\nIC%d: Manufacturer 0x%02X, Device 0x%02X", (x + 1), manufacturer, device);
-            identifyString.append(thisString);
+            for (int x = 0; x < 2; x++)
+            {
+                QString thisString;
+                uint8_t manufacturer0 = 0, manufacturer1 = 0;
+                uint8_t device0 = 0, device1 = 0;
+                p->getChipIdentity(x*2, &manufacturer0, &device0);
+                p->getChipIdentity(x*2+1, &manufacturer1, &device1);
+                thisString.sprintf("\nIC%d: Manufacturer 0x%04X, Device 0x%04X", (x + 1), (((uint16_t)manufacturer1) << 8) | manufacturer0, (((uint16_t)device1) << 8) | device0);
+                identifyString.append(thisString);
+            }
+        }
+        else
+        {
+            for (int x = 0; x < 4; x++)
+            {
+                QString thisString;
+                uint8_t manufacturer = 0;
+                uint8_t device = 0;
+                p->getChipIdentity(x, &manufacturer, &device);
+                thisString.sprintf("\nIC%d: Manufacturer 0x%02X, Device 0x%02X", (x + 1), manufacturer, device);
+                identifyString.append(thisString);
+            }
         }
 
         QMessageBox::information(this, "Identification complete", identifyString);
