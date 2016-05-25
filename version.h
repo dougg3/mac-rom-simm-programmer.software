@@ -21,8 +21,8 @@
 #define VERSION_H
 
 #define VERSION_MAJOR       1
-#define VERSION_MINOR       0
-#define VERSION_REVISION    3
+#define VERSION_MINOR       1
+#define VERSION_REVISION    0
 
 #define STRINGIFY_GUTS(x)   #x
 #define STRINGIFY(x)        STRINGIFY_GUTS(x)
