@@ -23,7 +23,7 @@ HEADERS  += mainwindow.h \
 FORMS    += mainwindow.ui \
     aboutbox.ui
 
-include(../doug-qextserialport-linuxnotifications/src/qextserialport.pri)
+include(3rdparty/qextserialport/src/qextserialport.pri)
 
 QMAKE_CXXFLAGS_RELEASE += -DQT_NO_DEBUG_OUTPUT
 
