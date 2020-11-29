@@ -1,0 +1,2 @@
+# udev rule file for Mac ROM SIMM Programmer
+ACTION=="add", SUBSYSTEMS=="usb", ATTRS{idVendor}=="16d0", ATTRS{idProduct}=="06aa", MODE="0666", GROUP="plugdev", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1", ENV{ID_MM_TTY_MANUAL_SCAN_ONLY}="1", ENV{ID_MM_TTY_BLACKLIST}="1"
