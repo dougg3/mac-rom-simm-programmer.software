@@ -23,6 +23,7 @@ HEADERS  += mainwindow.h \
 FORMS    += mainwindow.ui \
     aboutbox.ui
 
+linux*:CONFIG += qesp_linux_udev
 include(3rdparty/qextserialport/src/qextserialport.pri)
 
 QMAKE_CXXFLAGS_RELEASE += -DQT_NO_DEBUG_OUTPUT
