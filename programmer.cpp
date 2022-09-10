@@ -280,9 +280,9 @@ void Programmer::writeToSIMM(QIODevice *device, uint8_t chipsMask)
         writeLenRemaining = writeDevice->size();
         writeOffset = 0;
 
-        // Based on the SIMM size, tell the programmer board.
+        // Based on the SIMM type, tell the programmer board.
         uint8_t setLayoutCommand;
-        if (SIMMCapacity() > 4*1024*1024)
+	if(SIMMChip()==SIMM_TSOP_x8)
         {
             setLayoutCommand = SetSIMMLayout_AddressShifted;
         }
@@ -323,9 +323,9 @@ void Programmer::writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t l
         writeOffset = startOffset;
         writeLength = length;
 
-        // Based on the SIMM size, tell the programmer board.
+        // Based on the SIMM type, tell the programmer board.
         uint8_t setLayoutCommand;
-        if (SIMMCapacity() > 4*1024*1024)
+	if (SIMMChip() == SIMM_TSOP_x8)
         {
             setLayoutCommand = SetSIMMLayout_AddressShifted;
         }
@@ -408,7 +408,7 @@ void Programmer::handleChar(uint8_t c)
             // If we got an error reply, we MAY still be OK unless we were
             // requesting the large SIMM type, in which case the firmware
             // doesn't support the large SIMM type so the user needs to know.
-            if (SIMMCapacity() > 2*1024*1024)
+            if (SIMMChip() != SIMM_PLCC_x8)
             {
                 // Uh oh -- this is an old firmware that doesn't support a big
                 // SIMM. Let the caller know that the programmer board needs a
@@ -1160,7 +1160,7 @@ void Programmer::handleChar(uint8_t c)
             // If we got an error reply, we MAY still be OK unless we were
             // requesting the large SIMM type, in which case the firmware
             // doesn't support the large SIMM type so the user needs to know.
-            if (SIMMCapacity() > 2*1024*1024)
+	    if (SIMMChip() != SIMM_PLCC_x8)
             {
                 // Uh oh -- this is an old firmware that doesn't support a big
                 // SIMM. Let the caller know that the programmer board needs a
@@ -1405,9 +1405,9 @@ QString Programmer::electricalTestPinName(uint8_t index)
 void Programmer::identifySIMMChips()
 {
     //startProgrammerCommand(IdentifyChips, IdentificationAwaitingOKReply);
-    // Based on the SIMM size, tell the programmer board.
+    // Based on the SIMM type, tell the programmer board.
     uint8_t setLayoutCommand;
-    if (SIMMCapacity() > 4*1024*1024)
+    if (SIMMChip() == SIMM_TSOP_x8)
     {
         setLayoutCommand = SetSIMMLayout_AddressShifted;
     }
@@ -1596,14 +1596,20 @@ void Programmer::closePort()
     serialPort->close();
 }
 
-void Programmer::setSIMMCapacity(uint32_t bytes)
+void Programmer::setSIMMType(uint32_t bytes, uint32_t chip_type)
 {
     _simmCapacity = bytes;
+    _simmChip = chip_type;
 }
 
 uint32_t Programmer::SIMMCapacity() const
 {
     return _simmCapacity;
+}
+
+uint32_t Programmer::SIMMChip() const
+{
+    return _simmChip;
 }
 
 void Programmer::setVerifyMode(VerificationOption mode)

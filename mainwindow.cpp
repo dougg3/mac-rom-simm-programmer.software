@@ -33,6 +33,24 @@ static Programmer *p;
 #define verifyWhileWritingKey   "verifyWhileWriting"
 #define selectedEraseSizeKey    "selectedEraseSize"
 
+struct simmdesc {
+  uint32_t idx;
+  const char *text;
+  uint32_t size;
+  uint32_t chip_type;
+};
+
+simmdesc simmtable[] = {
+  { 0, "128KB (4x 256Kb PLCC)", 128, SIMM_PLCC_x8  },
+  { 1, "256KB (4x 512Kb PLCC)", 256, SIMM_PLCC_x8  },
+  { 2, "512KB (4x 1Mb PLCC)",   512, SIMM_PLCC_x8  },
+  { 3, "1MB (4x 2Mb PLCC)",    1024, SIMM_PLCC_x8  },
+  { 4, "2MB (4x 4Mb PLCC)",    2048, SIMM_PLCC_x8  },
+  { 5, "4MB (2x 16Mb TSOP)",   4096, SIMM_TSOP_x16 },
+  { 6, "8MB (4x 16Mb TSOP)",   8192, SIMM_TSOP_x8  },
+  { 7, "8MB (2x 32Mb TSOP)",   8192, SIMM_TSOP_x16 },
+};
+
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow),
@@ -55,16 +73,12 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->actionUpdate_firmware->setEnabled(false);
 
     // Fill in the list of SIMM chip capacities (programmer can support anywhere up to 8 MB of space)
-    ui->simmCapacityBox->addItem("128 KB (4 x 256Kb/chip)", QVariant(128 * 1024));
-    ui->simmCapacityBox->addItem("256 KB (4 x 512Kb/chip)", QVariant(256 * 1024));
-    ui->simmCapacityBox->addItem("512 KB (4 x 1Mb/chip)", QVariant(512 * 1024));
-    ui->simmCapacityBox->addItem("1 MB (4 x 2Mb/chip)", QVariant(1 * 1024 * 1024));
-    ui->simmCapacityBox->addItem("2 MB (4 x 4Mb/chip)", QVariant(2 * 1024 * 1024));
-    ui->simmCapacityBox->addItem("4 MB (2 x 16Mb/chip)", QVariant(4 * 1024 * 1024));
-    ui->simmCapacityBox->addItem("8 MB (4 x 16Mb/chip)", QVariant(8 * 1024 * 1024));
+    for(size_t i=0; i<sizeof(simmtable)/sizeof(simmdesc); i++) {
+      ui->simmCapacityBox->addItem(simmtable[i].text, QVariant(simmtable[i].idx));
+    }
 
     // Select 2 MB by default (it's what most people will want), or load last-used setting
-    QVariant selectedCapacity = settings.value(selectedCapacityKey, QVariant(2 * 1024 * 1024));
+    QVariant selectedCapacity = settings.value(selectedCapacityKey, QVariant(4));
     int selectedIndex = ui->simmCapacityBox->findData(selectedCapacity);
     if (selectedIndex != -1)
     {
@@ -793,8 +807,8 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
         ui->pages->setCurrentWidget(ui->controlPage);
         QString identifyString = "The chips identified themselves as:";
 
-        // 4MB SIMM actually only has two chips
-        if (p->SIMMCapacity() == 4*1024*1024)
+        // Check the number of chips
+        if (p->SIMMChip() == SIMM_TSOP_x16)
         {
             for (int x = 0; x < 2; x++)
             {
@@ -934,14 +948,14 @@ void MainWindow::resetAndShowStatusPage()
 
 void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
 {
-    uint32_t newCapacity = static_cast<uint32_t>(ui->simmCapacityBox->itemData(index).toUInt());
-    p->setSIMMCapacity(newCapacity);
+    uint32_t idx = static_cast<uint32_t>(ui->simmCapacityBox->itemData(index).toUInt());
+    p->setSIMMType(simmtable[idx].size*1024, simmtable[idx].chip_type);
     QSettings settings;
     if (!initializing)
     {
         // If we're not initializing (it gets called while we're initializing),
         // go ahead and save this as the new default.
-        settings.setValue(selectedCapacityKey, newCapacity);
+        settings.setValue(selectedCapacityKey, idx);
     }
 }
 
