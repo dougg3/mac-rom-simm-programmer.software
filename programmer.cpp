@@ -1354,7 +1354,7 @@ QString Programmer::electricalTestPinName(uint8_t index)
 {
     if (index <= LAST_ADDRESS_LINE_FAIL_INDEX)
     {
-        return QString().sprintf("A%d", index - FIRST_ADDRESS_LINE_FAIL_INDEX);
+        return QString().asprintf("A%d", index - FIRST_ADDRESS_LINE_FAIL_INDEX);
     }
     else if (index <= LAST_DATA_LINE_FAIL_INDEX)
     {
@@ -1378,7 +1378,7 @@ QString Programmer::electricalTestPinName(uint8_t index)
         {
             index = index - 24;
         }
-        return QString().sprintf("D%d", index);
+        return QString().asprintf("D%d", index);
     }
     else if (index == CS_FAIL_INDEX)
     {
