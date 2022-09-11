@@ -113,6 +113,10 @@ typedef enum VerificationOption
 #define OE_FAIL_INDEX						(CS_FAIL_INDEX + 1)
 #define WE_FAIL_INDEX						(OE_FAIL_INDEX + 1)
 
+#define SIMM_PLCC_x8    0x00
+#define SIMM_TSOP_x8    0x01
+#define SIMM_TSOP_x16   0x02
+
 class Programmer : public QObject
 {
     Q_OBJECT
@@ -128,8 +132,9 @@ public:
     void getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device);
     void flashFirmware(QString filename);
     void startCheckingPorts();
-    void setSIMMCapacity(uint32_t bytes);
+    void setSIMMType(uint32_t bytes, uint32_t chip_type);
     uint32_t SIMMCapacity() const;
+    uint32_t SIMMChip() const;
     void setVerifyMode(VerificationOption mode);
     VerificationOption verifyMode() const;
     uint8_t verifyBadChipMask() const { return _verifyBadChipMask; }
@@ -173,6 +178,7 @@ private:
     uint8_t readByte();
     void handleChar(uint8_t c);
     uint32_t _simmCapacity;
+    uint32_t _simmChip;
 
     uint32_t writeLenRemaining;
     uint32_t lenWritten;
