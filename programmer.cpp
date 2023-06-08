@@ -1541,8 +1541,9 @@ void Programmer::portDiscovered_internal()
 
 void Programmer::portRemoved(const QextPortInfo &info)
 {
-    if ((info.vendorID == PROGRAMMER_USB_VENDOR_ID) &&
-        (info.productID == PROGRAMMER_USB_DEVICE_ID) &&
+    const bool matchingVIDPID = info.vendorID == PROGRAMMER_USB_VENDOR_ID && info.productID == PROGRAMMER_USB_DEVICE_ID;
+    const bool matchingPortName = programmerBoardPortName != "" && info.portName == programmerBoardPortName;
+    if ((matchingVIDPID || matchingPortName) &&
         (foundState == ProgrammerBoardFound))
     {       
         programmerBoardPortName = "";
