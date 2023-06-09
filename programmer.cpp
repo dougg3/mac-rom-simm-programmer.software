@@ -1354,7 +1354,7 @@ QString Programmer::electricalTestPinName(uint8_t index)
 {
     if (index <= LAST_ADDRESS_LINE_FAIL_INDEX)
     {
-        return QString().sprintf("A%d", index - FIRST_ADDRESS_LINE_FAIL_INDEX);
+        return QString("A%1").arg(index - FIRST_ADDRESS_LINE_FAIL_INDEX);
     }
     else if (index <= LAST_DATA_LINE_FAIL_INDEX)
     {
@@ -1378,7 +1378,7 @@ QString Programmer::electricalTestPinName(uint8_t index)
         {
             index = index - 24;
         }
-        return QString().sprintf("D%d", index);
+        return QString("D%1").arg(index);
     }
     else if (index == CS_FAIL_INDEX)
     {
@@ -1541,8 +1541,9 @@ void Programmer::portDiscovered_internal()
 
 void Programmer::portRemoved(const QextPortInfo &info)
 {
-    if ((info.vendorID == PROGRAMMER_USB_VENDOR_ID) &&
-        (info.productID == PROGRAMMER_USB_DEVICE_ID) &&
+    const bool matchingVIDPID = info.vendorID == PROGRAMMER_USB_VENDOR_ID && info.productID == PROGRAMMER_USB_DEVICE_ID;
+    const bool matchingPortName = programmerBoardPortName != "" && info.portName == programmerBoardPortName;
+    if ((matchingVIDPID || matchingPortName) &&
         (foundState == ProgrammerBoardFound))
     {       
         programmerBoardPortName = "";

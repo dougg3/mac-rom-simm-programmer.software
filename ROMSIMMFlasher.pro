@@ -8,7 +8,7 @@ QT       += core gui widgets
 
 TARGET = SIMMProgrammer
 TEMPLATE = app
-
+QMAKE_TARGET_BUNDLE_PREFIX = com.downtowndougbrown
 
 SOURCES += main.cpp\
         mainwindow.cpp \

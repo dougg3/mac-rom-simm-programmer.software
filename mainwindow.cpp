@@ -817,7 +817,9 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
                 uint8_t device0 = 0, device1 = 0;
                 p->getChipIdentity(x*2, &manufacturer0, &device0);
                 p->getChipIdentity(x*2+1, &manufacturer1, &device1);
-                thisString.sprintf("\nIC%d: Manufacturer 0x%04X, Device 0x%04X", (x + 1), (((uint16_t)manufacturer1) << 8) | manufacturer0, (((uint16_t)device1) << 8) | device0);
+                thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
+                        .arg(QString::number((static_cast<uint16_t>(manufacturer1) << 8) | manufacturer0, 16).toUpper(), 4, QChar('0'))
+                        .arg(QString::number((static_cast<uint16_t>(device1) << 8) | device0, 16).toUpper(), 4, QChar('0'));
                 identifyString.append(thisString);
             }
         }
@@ -829,7 +831,9 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
                 uint8_t manufacturer = 0;
                 uint8_t device = 0;
                 p->getChipIdentity(x, &manufacturer, &device);
-                thisString.sprintf("\nIC%d: Manufacturer 0x%02X, Device 0x%02X", (x + 1), manufacturer, device);
+                thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
+                        .arg(QString::number(manufacturer, 16).toUpper(), 2, QChar('0'))
+                        .arg(QString::number(device, 16).toUpper(), 2, QChar('0'));
                 identifyString.append(thisString);
             }
         }
