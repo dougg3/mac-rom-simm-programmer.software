@@ -32,8 +32,13 @@ macx:CONFIG += x86
 macx:CONFIG += x86_64
 
 OTHER_FILES += \
-    SIMMProgrammer.rc
+    SIMMProgrammer.rc \
+    Info.plist
 
 RC_FILE = SIMMProgrammer.rc
 
 ICON = SIMMProgrammer.icns
+
+VERSION = 1.1.2
+
+macx:QMAKE_INFO_PLIST = Info.plist
