@@ -1,6 +1,8 @@
 # Mac ROM SIMM Programmer Software
 This is the Windows/Mac/Linux software that goes with the [Mac ROM SIMM Programmer](https://github.com/dougg3/mac-rom-simm-programmer). It allows you to read and write programmable ROM SIMMs, and also update the firmware of the programmer.
 
+This software is also compatible with the [bigmessowires programmer](http://www.bigmessowires.com/mac-rom-inator-ii-programming/) and the [CayMac Vintage programmer](https://ko-fi.com/s/6f9e9644e4). They are all based on my original design and share the same firmware and software.
+
 In order for this software to work correctly, make sure you pick the correct size that matches your ROM SIMM in the "SIMM capacity" dropdown at the top of the main window.
 
 ## Compiling
