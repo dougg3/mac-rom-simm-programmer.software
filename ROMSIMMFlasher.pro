@@ -17,8 +17,7 @@ SOURCES += main.cpp\
 
 HEADERS  += mainwindow.h \
     programmer.h \
-    aboutbox.h \
-    version.h
+    aboutbox.h
 
 FORMS    += mainwindow.ui \
     aboutbox.ui
@@ -40,5 +39,6 @@ RC_FILE = SIMMProgrammer.rc
 ICON = SIMMProgrammer.icns
 
 VERSION = 1.1.2
+DEFINES += VERSION_STRING=\\\"$$VERSION\\\"
 
 macx:QMAKE_INFO_PLIST = Info.plist
