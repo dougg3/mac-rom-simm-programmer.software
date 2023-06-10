@@ -19,7 +19,6 @@
 
 #include "aboutbox.h"
 #include "ui_aboutbox.h"
-#include "version.h"
 
 AboutBox *AboutBox::instance()
 {
