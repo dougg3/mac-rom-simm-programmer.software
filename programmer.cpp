@@ -1396,6 +1396,10 @@ QString Programmer::electricalTestPinName(uint8_t index)
     {
         return "GND";
     }
+    else if (index == VCC_FAIL_INDEX)
+    {
+        return "+5V";
+    }
     else
     {
         return "?";
