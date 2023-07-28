@@ -33,22 +33,22 @@ static Programmer *p;
 #define verifyWhileWritingKey   "verifyWhileWriting"
 #define selectedEraseSizeKey    "selectedEraseSize"
 
-struct simmdesc {
-  uint32_t idx;
-  const char *text;
-  uint32_t size;
-  uint32_t chip_type;
+struct SIMMDesc {
+    uint32_t index;
+    const char *text;
+    uint32_t size;
+    uint32_t chipType;
 };
 
-simmdesc simmtable[] = {
-  { 0, "128KB (4x 256Kb PLCC)", 128, SIMM_PLCC_x8  },
-  { 1, "256KB (4x 512Kb PLCC)", 256, SIMM_PLCC_x8  },
-  { 2, "512KB (4x 1Mb PLCC)",   512, SIMM_PLCC_x8  },
-  { 3, "1MB (4x 2Mb PLCC)",    1024, SIMM_PLCC_x8  },
-  { 4, "2MB (4x 4Mb PLCC)",    2048, SIMM_PLCC_x8  },
-  { 5, "4MB (2x 16Mb TSOP)",   4096, SIMM_TSOP_x16 },
-  { 6, "8MB (4x 16Mb TSOP)",   8192, SIMM_TSOP_x8  },
-  { 7, "8MB (2x 32Mb TSOP)",   8192, SIMM_TSOP_x16 },
+SIMMDesc simmTable[] ={
+    {0, "128KB (4x 256Kb PLCC)", 128, SIMM_PLCC_x8 },
+    {1, "256KB (4x 512Kb PLCC)", 256, SIMM_PLCC_x8 },
+    {2, "512KB (4x 1Mb PLCC)",   512, SIMM_PLCC_x8 },
+    {3, "1MB (4x 2Mb PLCC)",    1024, SIMM_PLCC_x8 },
+    {4, "2MB (4x 4Mb PLCC)",    2048, SIMM_PLCC_x8 },
+    {5, "4MB (2x 16Mb TSOP)",   4096, SIMM_TSOP_x16},
+    {6, "8MB (4x 16Mb TSOP)",   8192, SIMM_TSOP_x8 },
+    {7, "8MB (2x 32Mb TSOP)",   8192, SIMM_TSOP_x16},
 };
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -73,8 +73,9 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->actionUpdate_firmware->setEnabled(false);
 
     // Fill in the list of SIMM chip capacities (programmer can support anywhere up to 8 MB of space)
-    for(size_t i=0; i<sizeof(simmtable)/sizeof(simmdesc); i++) {
-      ui->simmCapacityBox->addItem(simmtable[i].text, QVariant(simmtable[i].idx));
+    for (size_t i = 0; i < sizeof(simmTable)/sizeof(simmTable[0]); i++)
+    {
+        ui->simmCapacityBox->addItem(simmTable[i].text, QVariant(simmTable[i].index));
     }
 
     // Select 2 MB by default (it's what most people will want), or load last-used setting
@@ -953,7 +954,7 @@ void MainWindow::resetAndShowStatusPage()
 void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
 {
     uint32_t idx = static_cast<uint32_t>(ui->simmCapacityBox->itemData(index).toUInt());
-    p->setSIMMType(simmtable[idx].size*1024, simmtable[idx].chip_type);
+    p->setSIMMType(simmTable[idx].size*1024, simmTable[idx].chipType);
     QSettings settings;
     if (!initializing)
     {
