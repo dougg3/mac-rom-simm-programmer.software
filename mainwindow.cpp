@@ -34,7 +34,7 @@ static Programmer *p;
 #define selectedEraseSizeKey    "selectedEraseSize"
 
 struct SIMMDesc {
-    uint32_t index;
+    uint32_t saveValue;
     const char *text;
     uint32_t size;
     uint32_t chipType;
@@ -46,6 +46,7 @@ SIMMDesc simmTable[] ={
     {2, "512KB (4x 1Mb PLCC)",   512, SIMM_PLCC_x8 },
     {3, "1MB (4x 2Mb PLCC)",    1024, SIMM_PLCC_x8 },
     {4, "2MB (4x 4Mb PLCC)",    2048, SIMM_PLCC_x8 },
+    {8, "2MB (2x 8Mb TSOP)",    2048, SIMM_TSOP_x16},
     {5, "4MB (2x 16Mb TSOP)",   4096, SIMM_TSOP_x16},
     {6, "8MB (4x 16Mb TSOP)",   8192, SIMM_TSOP_x8 },
     {7, "8MB (2x 32Mb TSOP)",   8192, SIMM_TSOP_x16},
@@ -75,7 +76,7 @@ MainWindow::MainWindow(QWidget *parent) :
     // Fill in the list of SIMM chip capacities (programmer can support anywhere up to 8 MB of space)
     for (size_t i = 0; i < sizeof(simmTable)/sizeof(simmTable[0]); i++)
     {
-        ui->simmCapacityBox->addItem(simmTable[i].text, QVariant(simmTable[i].index));
+        ui->simmCapacityBox->addItem(simmTable[i].text, QVariant(simmTable[i].saveValue));
     }
 
     // Select 2 MB by default (it's what most people will want), or load last-used setting
@@ -953,14 +954,14 @@ void MainWindow::resetAndShowStatusPage()
 
 void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
 {
-    uint32_t idx = static_cast<uint32_t>(ui->simmCapacityBox->itemData(index).toUInt());
-    p->setSIMMType(simmTable[idx].size*1024, simmTable[idx].chipType);
+    p->setSIMMType(simmTable[index].size*1024, simmTable[index].chipType);
     QSettings settings;
     if (!initializing)
     {
         // If we're not initializing (it gets called while we're initializing),
         // go ahead and save this as the new default.
-        settings.setValue(selectedCapacityKey, idx);
+        uint32_t saveValue = static_cast<uint32_t>(ui->simmCapacityBox->itemData(index).toUInt());
+        settings.setValue(selectedCapacityKey, saveValue);
     }
 }
 
