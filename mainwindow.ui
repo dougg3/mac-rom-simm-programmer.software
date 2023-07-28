@@ -56,7 +56,7 @@
          </layout>
         </item>
         <item>
-         <widget class="QGroupBox" name="writeGroupBox">
+         <widget class="DroppableGroupBox" name="writeGroupBox">
           <property name="title">
            <string>Write file to SIMM</string>
           </property>
@@ -113,7 +113,7 @@
          </widget>
         </item>
         <item>
-         <widget class="QGroupBox" name="readGroupBox">
+         <widget class="DroppableGroupBox" name="readGroupBox">
           <property name="title">
            <string>Read from SIMM to file</string>
           </property>
@@ -624,6 +624,14 @@
   </action>
  </widget>
  <layoutdefault spacing="6" margin="11"/>
+ <customwidgets>
+  <customwidget>
+   <class>DroppableGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>droppablegroupbox.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections>
   <connection>
