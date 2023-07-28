@@ -343,6 +343,18 @@ void MainWindow::on_chosenReadFile_textEdited(const QString &newText)
     }
 }
 
+void MainWindow::on_writeGroupBox_fileDropped(const QString &filePath)
+{
+    ui->chosenWriteFile->setText(filePath);
+    on_chosenWriteFile_textEdited(filePath);
+}
+
+void MainWindow::on_readGroupBox_fileDropped(const QString &filePath)
+{
+    ui->chosenReadFile->setText(filePath);
+    on_chosenReadFile_textEdited(filePath);
+}
+
 void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
 {
     switch (newStatus)

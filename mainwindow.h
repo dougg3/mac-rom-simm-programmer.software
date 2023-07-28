@@ -46,6 +46,9 @@ private slots:
     void on_chosenWriteFile_textEdited(const QString &newText);
     void on_chosenReadFile_textEdited(const QString &newText);
 
+    void on_writeGroupBox_fileDropped(const QString &filePath);
+    void on_readGroupBox_fileDropped(const QString &filePath);
+
     void programmerWriteStatusChanged(WriteStatus newStatus);
     void programmerWriteTotalLengthChanged(uint32_t totalLen);
     void programmerWriteCompletionLengthChanged(uint32_t len);
