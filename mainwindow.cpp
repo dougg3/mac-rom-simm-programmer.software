@@ -124,6 +124,8 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->howMuchToWriteBox->addItem("Only erase/write first 1 MB", QVariant(1024*1024));
     ui->howMuchToWriteBox->addItem("Only erase/write first 1.5 MB", QVariant(3*512*1024));
     ui->howMuchToWriteBox->addItem("Only erase/write first 2 MB", QVariant(2*1024*1024));
+    ui->howMuchToWriteBox->addItem("Only erase/write first 4 MB", QVariant(4*1024*1024));
+    ui->howMuchToWriteBox->addItem("Only erase/write first 8 MB", QVariant(8*1024*1024));
 
     // Select "erase entire SIMM" by default, or load last-used setting
     QVariant selectedEraseSize = settings.value(selectedEraseSizeKey, QVariant(0));
