@@ -11,11 +11,13 @@ TEMPLATE = app
 QMAKE_TARGET_BUNDLE_PREFIX = com.downtowndougbrown
 
 SOURCES += main.cpp\
+    droppablegroupbox.cpp \
         mainwindow.cpp \
     programmer.cpp \
     aboutbox.cpp
 
 HEADERS  += mainwindow.h \
+    droppablegroupbox.h \
     programmer.h \
     aboutbox.h
 
