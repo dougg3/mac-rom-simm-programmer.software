@@ -303,7 +303,7 @@ void MainWindow::on_writeToSIMMButton_clicked()
         }
         else
         {
-            p->writeToSIMM(writeFile, 0, howMuchToErase);
+            p->writeToSIMM(writeFile, 0, qMin(howMuchToErase, p->SIMMCapacity()));
         }
         qDebug() << "Writing to SIMM...";
     }
