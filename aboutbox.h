@@ -29,7 +29,7 @@ class AboutBox;
 class AboutBox : public QDialog
 {
     Q_OBJECT
-    
+
 public:
     static AboutBox *instance();
 private slots:

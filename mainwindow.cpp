@@ -33,22 +33,23 @@ static Programmer *p;
 #define verifyWhileWritingKey   "verifyWhileWriting"
 #define selectedEraseSizeKey    "selectedEraseSize"
 
-struct simmdesc {
-  uint32_t idx;
-  const char *text;
-  uint32_t size;
-  uint32_t chip_type;
+struct SIMMDesc {
+    uint32_t saveValue;
+    const char *text;
+    uint32_t size;
+    uint32_t chipType;
 };
 
-simmdesc simmtable[] = {
-  { 0, "128KB (4x 256Kb PLCC)", 128, SIMM_PLCC_x8  },
-  { 1, "256KB (4x 512Kb PLCC)", 256, SIMM_PLCC_x8  },
-  { 2, "512KB (4x 1Mb PLCC)",   512, SIMM_PLCC_x8  },
-  { 3, "1MB (4x 2Mb PLCC)",    1024, SIMM_PLCC_x8  },
-  { 4, "2MB (4x 4Mb PLCC)",    2048, SIMM_PLCC_x8  },
-  { 5, "4MB (2x 16Mb TSOP)",   4096, SIMM_TSOP_x16 },
-  { 6, "8MB (4x 16Mb TSOP)",   8192, SIMM_TSOP_x8  },
-  { 7, "8MB (2x 32Mb TSOP)",   8192, SIMM_TSOP_x16 },
+SIMMDesc simmTable[] ={
+    {0, "128KB (4x 256Kb PLCC)", 128, SIMM_PLCC_x8 },
+    {1, "256KB (4x 512Kb PLCC)", 256, SIMM_PLCC_x8 },
+    {2, "512KB (4x 1Mb PLCC)",   512, SIMM_PLCC_x8 },
+    {3, "1MB (4x 2Mb PLCC)",    1024, SIMM_PLCC_x8 },
+    {4, "2MB (4x 4Mb PLCC)",    2048, SIMM_PLCC_x8 },
+    {8, "2MB (2x 8Mb TSOP)",    2048, SIMM_TSOP_x16},
+    {5, "4MB (2x 16Mb TSOP)",   4096, SIMM_TSOP_x16},
+    {6, "8MB (4x 16Mb TSOP)",   8192, SIMM_TSOP_x8 },
+    {7, "8MB (2x 32Mb TSOP)",   8192, SIMM_TSOP_x16},
 };
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -73,8 +74,9 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->actionUpdate_firmware->setEnabled(false);
 
     // Fill in the list of SIMM chip capacities (programmer can support anywhere up to 8 MB of space)
-    for(size_t i=0; i<sizeof(simmtable)/sizeof(simmdesc); i++) {
-      ui->simmCapacityBox->addItem(simmtable[i].text, QVariant(simmtable[i].idx));
+    for (size_t i = 0; i < sizeof(simmTable)/sizeof(simmTable[0]); i++)
+    {
+        ui->simmCapacityBox->addItem(simmTable[i].text, QVariant(simmTable[i].saveValue));
     }
 
     // Select 2 MB by default (it's what most people will want), or load last-used setting
@@ -122,6 +124,8 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->howMuchToWriteBox->addItem("Only erase/write first 1 MB", QVariant(1024*1024));
     ui->howMuchToWriteBox->addItem("Only erase/write first 1.5 MB", QVariant(3*512*1024));
     ui->howMuchToWriteBox->addItem("Only erase/write first 2 MB", QVariant(2*1024*1024));
+    ui->howMuchToWriteBox->addItem("Only erase/write first 4 MB", QVariant(4*1024*1024));
+    ui->howMuchToWriteBox->addItem("Only erase/write first 8 MB", QVariant(8*1024*1024));
 
     // Select "erase entire SIMM" by default, or load last-used setting
     QVariant selectedEraseSize = settings.value(selectedEraseSizeKey, QVariant(0));
@@ -299,7 +303,7 @@ void MainWindow::on_writeToSIMMButton_clicked()
         }
         else
         {
-            p->writeToSIMM(writeFile, 0, howMuchToErase);
+            p->writeToSIMM(writeFile, 0, qMin(howMuchToErase, p->SIMMCapacity()));
         }
         qDebug() << "Writing to SIMM...";
     }
@@ -337,6 +341,18 @@ void MainWindow::on_chosenReadFile_textEdited(const QString &newText)
         ui->readFromSIMMButton->setEnabled(false);
         readFileValid = false;
     }
+}
+
+void MainWindow::on_writeGroupBox_fileDropped(const QString &filePath)
+{
+    ui->chosenWriteFile->setText(filePath);
+    on_chosenWriteFile_textEdited(filePath);
+}
+
+void MainWindow::on_readGroupBox_fileDropped(const QString &filePath)
+{
+    ui->chosenReadFile->setText(filePath);
+    on_chosenReadFile_textEdited(filePath);
 }
 
 void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
@@ -952,14 +968,14 @@ void MainWindow::resetAndShowStatusPage()
 
 void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
 {
-    uint32_t idx = static_cast<uint32_t>(ui->simmCapacityBox->itemData(index).toUInt());
-    p->setSIMMType(simmtable[idx].size*1024, simmtable[idx].chip_type);
+    p->setSIMMType(simmTable[index].size*1024, simmTable[index].chipType);
     QSettings settings;
     if (!initializing)
     {
         // If we're not initializing (it gets called while we're initializing),
         // go ahead and save this as the new default.
-        settings.setValue(selectedCapacityKey, idx);
+        uint32_t saveValue = static_cast<uint32_t>(ui->simmCapacityBox->itemData(index).toUInt());
+        settings.setValue(selectedCapacityKey, saveValue);
     }
 }
 

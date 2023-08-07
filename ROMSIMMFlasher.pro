@@ -11,11 +11,13 @@ TEMPLATE = app
 QMAKE_TARGET_BUNDLE_PREFIX = com.downtowndougbrown
 
 SOURCES += main.cpp\
+    droppablegroupbox.cpp \
         mainwindow.cpp \
     programmer.cpp \
     aboutbox.cpp
 
 HEADERS  += mainwindow.h \
+    droppablegroupbox.h \
     programmer.h \
     aboutbox.h
 
@@ -43,7 +45,7 @@ lessThan(QT_MAJOR_VERSION, 5) {
 	win32:RC_ICONS = SIMMProgrammer.ico
 }
 
-VERSION = 1.1.2
+VERSION = 1.2.0
 DEFINES += VERSION_STRING=\\\"$$VERSION\\\"
 
 macx:QMAKE_INFO_PLIST = Info.plist

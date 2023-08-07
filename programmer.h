@@ -104,6 +104,7 @@ typedef enum VerificationOption
 
 // Electrical test indexes
 #define GROUND_FAIL_INDEX					0xFF
+#define VCC_FAIL_INDEX						0xFE
 
 #define FIRST_ADDRESS_LINE_FAIL_INDEX		0
 #define LAST_ADDRESS_LINE_FAIL_INDEX		(FIRST_ADDRESS_LINE_FAIL_INDEX + 20)

@@ -21,6 +21,7 @@
 #include <QDebug>
 #include <QWaitCondition>
 #include <QMutex>
+#include <QTimer>
 
 typedef enum ProgrammerCommandState
 {
@@ -282,7 +283,7 @@ void Programmer::writeToSIMM(QIODevice *device, uint8_t chipsMask)
 
         // Based on the SIMM type, tell the programmer board.
         uint8_t setLayoutCommand;
-	if(SIMMChip()==SIMM_TSOP_x8)
+        if (SIMMChip() == SIMM_TSOP_x8)
         {
             setLayoutCommand = SetSIMMLayout_AddressShifted;
         }
@@ -325,7 +326,7 @@ void Programmer::writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t l
 
         // Based on the SIMM type, tell the programmer board.
         uint8_t setLayoutCommand;
-	if (SIMMChip() == SIMM_TSOP_x8)
+        if (SIMMChip() == SIMM_TSOP_x8)
         {
             setLayoutCommand = SetSIMMLayout_AddressShifted;
         }
@@ -905,7 +906,7 @@ void Programmer::handleChar(uint8_t c)
 
     // READ SIMM STATE HANDLERS
 
-    // Expecting reply after we told the programmer to start reading       
+    // Expecting reply after we told the programmer to start reading
     case ReadSIMMWaitingStartReply:
     case ReadSIMMWaitingStartOffsetReply:
         switch (c)
@@ -1160,7 +1161,7 @@ void Programmer::handleChar(uint8_t c)
             // If we got an error reply, we MAY still be OK unless we were
             // requesting the large SIMM type, in which case the firmware
             // doesn't support the large SIMM type so the user needs to know.
-	    if (SIMMChip() != SIMM_PLCC_x8)
+            if (SIMMChip() != SIMM_PLCC_x8)
             {
                 // Uh oh -- this is an old firmware that doesn't support a big
                 // SIMM. Let the caller know that the programmer board needs a
@@ -1396,6 +1397,10 @@ QString Programmer::electricalTestPinName(uint8_t index)
     {
         return "GND";
     }
+    else if (index == VCC_FAIL_INDEX)
+    {
+        return "+5V";
+    }
     else
     {
         return "?";
@@ -1480,7 +1485,6 @@ void Programmer::startBootloaderCommand(uint8_t commandByte, uint32_t newState)
     sendByte(GetBootloaderState);
 }
 
-#include <QTimer>
 void Programmer::portDiscovered(const QextPortInfo &info)
 {
     if ((foundState == ProgrammerBoardNotFound) &&
@@ -1545,7 +1549,7 @@ void Programmer::portRemoved(const QextPortInfo &info)
     const bool matchingPortName = programmerBoardPortName != "" && info.portName == programmerBoardPortName;
     if ((matchingVIDPID || matchingPortName) &&
         (foundState == ProgrammerBoardFound))
-    {       
+    {
         programmerBoardPortName = "";
         foundState = ProgrammerBoardNotFound;
 

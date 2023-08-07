@@ -31,11 +31,11 @@ class MainWindow;
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
-    
+
 public:
     explicit MainWindow(QWidget *parent = 0);
     ~MainWindow();
-    
+
 private slots:
     void on_selectWriteFileButton_clicked();
     void on_selectReadFileButton_clicked();
@@ -45,6 +45,9 @@ private slots:
 
     void on_chosenWriteFile_textEdited(const QString &newText);
     void on_chosenReadFile_textEdited(const QString &newText);
+
+    void on_writeGroupBox_fileDropped(const QString &filePath);
+    void on_readGroupBox_fileDropped(const QString &filePath);
 
     void programmerWriteStatusChanged(WriteStatus newStatus);
     void programmerWriteTotalLengthChanged(uint32_t totalLen);
