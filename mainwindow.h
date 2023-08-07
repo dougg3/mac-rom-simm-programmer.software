@@ -102,8 +102,6 @@ private slots:
 private:
     Ui::MainWindow *ui;
     bool initializing;
-    bool writeFileValid;
-    bool readFileValid;
     QFile *writeFile;
     QFile *readFile;
     QString electricalTestString;

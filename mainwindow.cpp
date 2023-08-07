@@ -137,8 +137,6 @@ MainWindow::MainWindow(QWidget *parent) :
 
     ui->chosenWriteFile->setText("");
     ui->chosenReadFile->setText("");
-    writeFileValid = false;
-    readFileValid = false;
     ui->writeToSIMMButton->setEnabled(false);
     ui->readFromSIMMButton->setEnabled(false);
     ui->progressBar->setValue(0);
@@ -209,7 +207,6 @@ void MainWindow::on_selectWriteFileButton_clicked()
     QString filename = QFileDialog::getOpenFileName(this, "Select a ROM image:");
     if (!filename.isNull())
     {
-        writeFileValid = true;
         ui->chosenWriteFile->setText(filename);
         ui->writeToSIMMButton->setEnabled(true);
     }
@@ -220,7 +217,6 @@ void MainWindow::on_selectReadFileButton_clicked()
     QString filename = QFileDialog::getSaveFileName(this, "Save ROM image as:");
     if (!filename.isNull())
     {
-        readFileValid = true;
         ui->chosenReadFile->setText(filename);
         ui->readFromSIMMButton->setEnabled(true);
     }
@@ -319,12 +315,10 @@ void MainWindow::on_chosenWriteFile_textEdited(const QString &newText)
     if (!newText.isEmpty() && fi.exists() && fi.isFile())
     {
         ui->writeToSIMMButton->setEnabled(true);
-        writeFileValid = true;
     }
     else
     {
         ui->writeToSIMMButton->setEnabled(false);
-        writeFileValid = false;
     }
 }
 
@@ -334,12 +328,10 @@ void MainWindow::on_chosenReadFile_textEdited(const QString &newText)
     if (!newText.isEmpty() && fi.dir().exists())
     {
         ui->readFromSIMMButton->setEnabled(true);
-        readFileValid = true;
     }
     else
     {
         ui->readFromSIMMButton->setEnabled(false);
-        readFileValid = false;
     }
 }
 
