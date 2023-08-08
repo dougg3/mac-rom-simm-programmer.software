@@ -25,6 +25,7 @@
 #include <QMessageBox>
 #include <QDebug>
 #include <QSettings>
+#include <QBuffer>
 
 static Programmer *p;
 
@@ -142,6 +143,10 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->progressBar->setValue(0);
     ui->statusLabel->setText("");
     ui->cancelButton->setEnabled(false);
+
+    ui->writeCombinedFileToSIMMButton->setEnabled(false);
+    ui->saveCombinedFileButton->setEnabled(false);
+    ui->createROMErrorText->setText("");
 
     connect(p, SIGNAL(writeStatusChanged(WriteStatus)), SLOT(programmerWriteStatusChanged(WriteStatus)));
     connect(p, SIGNAL(writeTotalLengthChanged(uint32_t)), SLOT(programmerWriteTotalLengthChanged(uint32_t)));
@@ -263,6 +268,11 @@ void MainWindow::on_readFromSIMMButton_clicked()
 
 void MainWindow::on_writeToSIMMButton_clicked()
 {
+    doInternalWrite(new QFile(ui->chosenWriteFile->text()));
+}
+
+void MainWindow::doInternalWrite(QIODevice *device)
+{
     // Ensure we don't think we're in buffer writing/reading mode...we're writing
     // an actual file.
     if (writeBuffer)
@@ -280,7 +290,7 @@ void MainWindow::on_writeToSIMMButton_clicked()
         writeFile->close();
         delete writeFile;
     }
-    writeFile = new QFile(ui->chosenWriteFile->text());
+    writeFile = device;
     if (writeFile)
     {
         if (!writeFile->open(QFile::ReadOnly))
@@ -1508,5 +1518,239 @@ void MainWindow::returnToControlPage()
     else
     {
         ui->pages->setCurrentWidget(ui->controlPage);
+    }
+}
+
+void MainWindow::on_selectBaseROMButton_clicked()
+{
+    QString filename = QFileDialog::getOpenFileName(this, "Select a base ROM image:");
+    if (!filename.isNull())
+    {
+        ui->chosenBaseROMFile->setText(filename);
+        updateCreateROMControlStatus();
+    }
+}
+
+
+void MainWindow::on_selectDiskImageButton_clicked()
+{
+    QString filename = QFileDialog::getOpenFileName(this, "Select a disk image to add to the ROM:");\
+    if (!filename.isNull())
+    {
+        ui->chosenDiskImageFile->setText(filename);
+        updateCreateROMControlStatus();
+    }
+}
+
+
+void MainWindow::on_chosenBaseROMFile_textEdited(const QString &text)
+{
+    Q_UNUSED(text);
+    updateCreateROMControlStatus();
+}
+
+
+void MainWindow::on_chosenDiskImageFile_textEdited(const QString &text)
+{
+    Q_UNUSED(text);
+    updateCreateROMControlStatus();
+}
+
+void MainWindow::updateCreateROMControlStatus()
+{
+    QString baseROMError;
+    QString diskImageError;
+    bool baseROMValid = checkBaseROMValidity(baseROMError);
+    bool diskImageValid = checkDiskImageValidity(diskImageError);
+
+    ui->writeCombinedFileToSIMMButton->setEnabled(baseROMValid && diskImageValid);
+    ui->saveCombinedFileButton->setEnabled(baseROMValid && diskImageValid);
+
+    if (!baseROMValid && !baseROMError.isEmpty())
+    {
+        ui->createROMErrorText->setText(baseROMError);
+    }
+    else if (!diskImageValid && !diskImageError.isEmpty())
+    {
+        ui->createROMErrorText->setText(diskImageError);
+    }
+    else
+    {
+        ui->createROMErrorText->setText("");
+    }
+}
+
+bool MainWindow::checkBaseROMValidity(QString &errorText)
+{
+    const QString baseROMFileName = ui->chosenBaseROMFile->text();
+    QFileInfo fi(baseROMFileName);
+    if (baseROMFileName.isEmpty() || !fi.exists() || !fi.isFile())
+    {
+        errorText = "";
+        return false;
+    }
+
+    // Check to make sure it's actually a ROM file that has disk image capabilities.
+    // Easiest way to do this is look for the hack near 0x1700.
+    if (fi.size() != 512*1024)
+    {
+        errorText = "The selected base ROM is not exactly 512 KB in size.";
+        return false;
+    }
+
+    QFile f(baseROMFileName);
+    if (!f.open(QFile::ReadOnly))
+    {
+        errorText = "Unable to open the base ROM.";
+        return false;
+    }
+
+    QByteArray romData = f.read(0x1708);
+    f.close();
+
+    if (romData.length() != 0x1708)
+    {
+        errorText = "Unable to read from base ROM.";
+        return false;
+    }
+
+    if (romData.at(0x1706) == 0x4E && romData.at(0x1707) == 0x75)
+    {
+        // If there's an RTS here, it's probably a ROM image, but it hasn't
+        // been hacked to add the ROM disk driver.
+        errorText = "The chosen base ROM isn't compatible with ROM disks.";
+        return false;
+    }
+    else if (romData.at(0x1706) != 0x67)
+    {
+        // If there isn't a BEQ instruction here, it's likely not a ROM image,
+        // hacked or otherwise.
+        errorText = "The chosen base ROM doesn't appear to be a Mac ROM image.";
+        return false;
+    }
+
+    // Basic sanity check is now done. Theres's a BEQ instruction where we would
+    // expect to find it in a ROM that has ROM disk support.
+    return true;
+}
+
+bool MainWindow::checkDiskImageValidity(QString &errorText)
+{
+    const QString diskImageFileName = ui->chosenDiskImageFile->text();
+    QFileInfo fi(diskImageFileName);
+    if (diskImageFileName.isEmpty() || !fi.exists() || !fi.isFile())
+    {
+        errorText = "";
+        return false;
+    }
+
+    // For now, validate disk images by ensuring they begin with boot blocks "LK"
+    // as well as an HFS disk image afterward "BD"
+    if (fi.size() < 1026)
+    {
+        errorText = "The selected disk image is too small to be a disk image.";
+        return false;
+    }
+
+    QFile f(diskImageFileName);
+    if (!f.open(QFile::ReadOnly))
+    {
+        errorText = "Unable to open the disk image.";
+        return false;
+    }
+
+    QByteArray diskImageData = f.read(1026);
+    f.close();
+
+    if (diskImageData.length() != 1026)
+    {
+        errorText = "Unable to read from disk image.";
+        return false;
+    }
+
+    if (diskImageData.at(1024) != 'B' || diskImageData.at(1025) != 'D')
+    {
+        errorText = "The chosen disk image is not an HFS disk image.";
+        return false;
+    }
+
+    if (diskImageData.at(0) != 'L' || diskImageData.at(1) != 'K')
+    {
+        errorText = "The chosen disk image doesn't have boot blocks.";
+        return false;
+    }
+
+    return true;
+}
+
+QByteArray MainWindow::createROM()
+{
+    QByteArray finalImage;
+    const QString baseROMFileName = ui->chosenBaseROMFile->text();
+    const QString diskImageFileName = ui->chosenDiskImageFile->text();
+
+    QFile f(baseROMFileName);
+    if (!f.open(QFile::ReadOnly))
+    {
+        return QByteArray();
+    }
+    finalImage = f.readAll();
+    f.close();
+
+    f.setFileName(diskImageFileName);
+    if (!f.open(QFile::ReadOnly))
+    {
+        return QByteArray();
+    }
+    finalImage += f.readAll();
+    f.close();
+
+    return finalImage;
+}
+
+void MainWindow::on_writeCombinedFileToSIMMButton_clicked()
+{
+    QByteArray dataToWrite = createROM();
+    if (dataToWrite.isEmpty())
+    {
+        QMessageBox::warning(this, "Error combining files", "The ROM and disk image were unable to be combined. Make sure you chose the correct files.");
+        return;
+    }
+
+    QBuffer *combinedFile = new QBuffer();
+    combinedFile->setData(dataToWrite);
+    doInternalWrite(combinedFile);
+}
+
+void MainWindow::on_saveCombinedFileButton_clicked()
+{
+    QByteArray dataToWrite = createROM();
+    if (dataToWrite.isEmpty())
+    {
+        QMessageBox::warning(this, "Error combining files", "The ROM and disk image were unable to be combined. Make sure you chose the correct files.");
+        return;
+    }
+
+    QString filename = QFileDialog::getSaveFileName(this, "Save combined ROM and disk image as:");
+    if (!filename.isNull())
+    {
+        QFile f(filename);
+        if (!f.open(QFile::WriteOnly))
+        {
+            QMessageBox::warning(this, "Error opening output file", "Unable to open file for writing. Make sure you have correct file permissions.");
+            return;
+        }
+
+        bool success = f.write(dataToWrite) == dataToWrite.length();
+        f.close();
+
+        if (success)
+        {
+            QMessageBox::information(this, "Save complete", "The combined ROM image was saved successfully.");
+        }
+        else
+        {
+            QMessageBox::warning(this, "Error writing output file", "Unable to save combined ROM image.");
+        }
     }
 }

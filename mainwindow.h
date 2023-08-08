@@ -41,6 +41,7 @@ private slots:
     void on_selectReadFileButton_clicked();
 
     void on_writeToSIMMButton_clicked();
+    void doInternalWrite(QIODevice *device);
     void on_readFromSIMMButton_clicked();
 
     void on_chosenWriteFile_textEdited(const QString &newText);
@@ -99,10 +100,18 @@ private slots:
     void on_multiReadChipsButton_clicked();
     void finishMultiRead();
 
+    void on_selectBaseROMButton_clicked();
+    void on_selectDiskImageButton_clicked();
+    void on_chosenBaseROMFile_textEdited(const QString &text);
+    void on_chosenDiskImageFile_textEdited(const QString &text);
+    void updateCreateROMControlStatus();
+    void on_writeCombinedFileToSIMMButton_clicked();
+    void on_saveCombinedFileButton_clicked();
+
 private:
     Ui::MainWindow *ui;
     bool initializing;
-    QFile *writeFile;
+    QIODevice *writeFile;
     QFile *readFile;
     QString electricalTestString;
     QBuffer *writeBuffer;
@@ -115,6 +124,10 @@ private:
     void showFlashIndividualControls();
 
     void returnToControlPage();
+
+    bool checkBaseROMValidity(QString &errorText);
+    bool checkDiskImageValidity(QString &errorText);
+    QByteArray createROM();
 };
 
 #endif // MAINWINDOW_H
