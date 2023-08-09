@@ -131,7 +131,8 @@ private:
 
     bool checkBaseROMValidity(QString &errorText);
     bool checkBaseROMCompressionSupport();
-    bool checkDiskImageValidity(QString &errorText);
+    bool checkDiskImageValidity(QString &errorText, bool &alreadyCompressed);
+    bool isCompressedDiskImage(QByteArray const &image);
     void compressImageInBackground(QByteArray uncompressedImage, bool blockUntilCompletion);
     QByteArray uncompressedDiskImage();
     QByteArray diskImageToWrite();

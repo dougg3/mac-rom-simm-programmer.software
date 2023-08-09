@@ -1574,7 +1574,8 @@ void MainWindow::updateCreateROMControlStatus()
     QString baseROMError;
     QString diskImageError;
     bool baseROMValid = checkBaseROMValidity(baseROMError);
-    bool diskImageValid = checkDiskImageValidity(diskImageError);
+    bool alreadyCompressed = false;
+    bool diskImageValid = checkDiskImageValidity(diskImageError, alreadyCompressed);
     bool error = true;
 
     ui->writeCombinedFileToSIMMButton->setEnabled(baseROMValid && diskImageValid);
@@ -1591,7 +1592,8 @@ void MainWindow::updateCreateROMControlStatus()
     else if (baseROMValid && diskImageValid)
     {
         QByteArray uncompressedImage = uncompressedDiskImage();
-        bool shouldCompress = checkBaseROMCompressionSupport();
+        bool supportsCompression = checkBaseROMCompressionSupport();
+        bool shouldCompress = supportsCompression && !alreadyCompressed;
         error = false;
         if (shouldCompress &&
             !FC8Compressor::hashMatchesFile(compressedImageFileHash, uncompressedImage))
@@ -1602,6 +1604,15 @@ void MainWindow::updateCreateROMControlStatus()
             compressImageInBackground(uncompressedImage, false);
 
             // While it's compressing, we can't allow writing/saving
+            ui->writeCombinedFileToSIMMButton->setEnabled(false);
+            ui->saveCombinedFileButton->setEnabled(false);
+        }
+        else if (!supportsCompression && alreadyCompressed)
+        {
+            // If they choose a compressed disk image and a ROM that doesn't support compression,
+            // detect that edge case
+            ui->createROMErrorText->setText("ROM doesn't support compression, but disk image is compressed");
+            error = true;
             ui->writeCombinedFileToSIMMButton->setEnabled(false);
             ui->saveCombinedFileButton->setEnabled(false);
         }
@@ -1620,7 +1631,7 @@ void MainWindow::updateCreateROMControlStatus()
             }
 
             QString prettySize = displayableFileSize(size);
-            if (shouldCompress)
+            if (shouldCompress || alreadyCompressed)
             {
                 prettySize += " (compressed)";
             }
@@ -1731,8 +1742,10 @@ bool MainWindow::checkBaseROMCompressionSupport()
     return romData.contains(" block-compressed disk image");
 }
 
-bool MainWindow::checkDiskImageValidity(QString &errorText)
+bool MainWindow::checkDiskImageValidity(QString &errorText, bool &alreadyCompressed)
 {
+    alreadyCompressed = false;
+
     const QString diskImageFileName = ui->chosenDiskImageFile->text();
     QFileInfo fi(diskImageFileName);
     if (diskImageFileName.isEmpty() || !fi.exists() || !fi.isFile())
@@ -1765,6 +1778,15 @@ bool MainWindow::checkDiskImageValidity(QString &errorText)
         return false;
     }
 
+    // This image is already compressed (FC8 block mode or whole mode)
+    if (isCompressedDiskImage(diskImageData))
+    {
+        alreadyCompressed = true;
+        // Assume compressed images are usable. We don't want to decompress
+        // just to find out. Not worth the effort.
+        return true;
+    }
+
     if (diskImageData.at(1024) != 'B' || diskImageData.at(1025) != 'D')
     {
         errorText = "The chosen disk image is not an HFS disk image.";
@@ -1778,6 +1800,14 @@ bool MainWindow::checkDiskImageValidity(QString &errorText)
     }
 
     return true;
+}
+
+bool MainWindow::isCompressedDiskImage(const QByteArray &image)
+{
+    // Look for start of FC8b or FC8_
+    return image.length() >= 4 && image.at(0) == 'F' &&
+        image.at(1) == 'C' && image.at(2) == '8' &&
+        (image.at(3) == 'b' || image.at(3) == '_');
 }
 
 void MainWindow::compressImageInBackground(QByteArray uncompressedImage, bool blockUntilCompletion)
@@ -1837,8 +1867,10 @@ QByteArray MainWindow::diskImageToWrite()
 {
     QByteArray uncompressedImage = uncompressedDiskImage();
 
-    // If the selected ROM doesn't support compression, return it
-    if (!checkBaseROMCompressionSupport())
+    // If the selected ROM doesn't support compression, return it uncompressed.
+    // Also, if it's a compressed disk image, return it as is (earlier checks
+    // will have already ensured we are using a supported ROM in that case)
+    if (!checkBaseROMCompressionSupport() || isCompressedDiskImage(uncompressedImage))
     {
         return uncompressedImage;
     }
