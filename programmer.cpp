@@ -203,6 +203,7 @@ static QString programmerBoardPortName;
 Programmer::Programmer(QObject *parent) :
     QObject(parent)
 {
+    detectedDeviceRevision = 0;
     _verifyMode = VerifyAfterWrite;
     _verifyBadChipMask = 0;
     verifyArray = new QByteArray();
@@ -1502,6 +1503,7 @@ void Programmer::portDiscovered(const QextPortInfo &info)
         programmerBoardPortName = info.portName;
 #endif
         foundState = ProgrammerBoardFound;
+        detectedDeviceRevision = info.revision;
 
         // I create a temporary timer here because opening it immediately seems to crash
         // Mac OS X in my limited testing. Don't worry about a memory leak -- the
@@ -1552,6 +1554,7 @@ void Programmer::portRemoved(const QextPortInfo &info)
     {
         programmerBoardPortName = "";
         foundState = ProgrammerBoardNotFound;
+        detectedDeviceRevision = 0;
 
         // Don't show the "no programmer connected" screen if we intentionally
         // disconnected the USB port because we are changing from bootloader
@@ -1625,6 +1628,11 @@ void Programmer::setVerifyMode(VerificationOption mode)
 VerificationOption Programmer::verifyMode() const
 {
     return _verifyMode;
+}
+
+ProgrammerRevision Programmer::programmerRevision() const
+{
+    return static_cast<ProgrammerRevision>(detectedDeviceRevision);
 }
 
 void Programmer::doVerifyAfterWriteCompare()

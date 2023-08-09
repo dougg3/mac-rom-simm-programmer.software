@@ -102,6 +102,13 @@ typedef enum VerificationOption
     VerifyAfterWrite
 } VerificationOption;
 
+typedef enum ProgrammerRevision
+{
+    ProgrammerRevisionUnknown = 0,
+    ProgrammerRevisionAVR = 1,
+    ProgrammerRevisionM258KE = 2
+} ProgrammerRevision;
+
 // Electrical test indexes
 #define GROUND_FAIL_INDEX					0xFF
 #define VCC_FAIL_INDEX						0xFE
@@ -139,6 +146,7 @@ public:
     void setVerifyMode(VerificationOption mode);
     VerificationOption verifyMode() const;
     uint8_t verifyBadChipMask() const { return _verifyBadChipMask; }
+    ProgrammerRevision programmerRevision() const;
 signals:
     void startStatusChanged(StartStatus status);
 
@@ -196,6 +204,7 @@ private:
     uint8_t chipManufacturerIDs[4];
     uint8_t chipDeviceIDs[4];
 
+    uint16_t detectedDeviceRevision;
     uint32_t firmwareLenRemaining;
     uint32_t firmwareLenWritten;
 

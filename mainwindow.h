@@ -137,6 +137,8 @@ private:
     QByteArray diskImageToWrite();
     QByteArray createROM();
     QString displayableFileSize(qint64 size);
+
+    bool firmwareIsCompatible(QString filename, QString &compatibilityError);
 };
 
 #endif // MAINWINDOW_H

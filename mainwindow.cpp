@@ -918,9 +918,17 @@ void MainWindow::on_actionUpdate_firmware_triggered()
     QString filename = QFileDialog::getOpenFileName(this, "Select a firmware image:");
     if (!filename.isNull())
     {
-        resetAndShowStatusPage();
-        p->flashFirmware(filename);
-        qDebug() << "Updating firmware...";
+        QString compatibilityError;
+        if (firmwareIsCompatible(filename, compatibilityError))
+        {
+            resetAndShowStatusPage();
+            p->flashFirmware(filename);
+            qDebug() << "Updating firmware...";
+        }
+        else
+        {
+            QMessageBox::warning(this, "Invalid firmware file", compatibilityError);
+        }
     }
 }
 
@@ -1965,4 +1973,76 @@ void MainWindow::compressorThreadFinished(QByteArray hashOfOriginal, QByteArray 
     compressedImageFileHash = hashOfOriginal;
     compressedImage = compressedData;
     updateCreateROMControlStatus();
+}
+
+bool MainWindow::firmwareIsCompatible(QString filename, QString &compatibilityError)
+{
+    QFile fwFile(filename);
+    if (!fwFile.open(QFile::ReadOnly))
+    {
+        compatibilityError = "Unable to open the selected firmware file.";
+        return false;
+    }
+
+    QByteArray firmware = fwFile.readAll();
+    fwFile.close();
+
+    // Find the device descriptor in the dump. Locate it by
+    // searching for the USB VID and PID, and then double-checking
+    // that it's actually a device descriptor by verifying the surrounding data.
+    QByteArray vidPid("\xD0\x16\xAA\x06", 4);
+    int index = 0;
+    int descriptorsFound = 0;
+    do
+    {
+        index = firmware.indexOf(vidPid, index);
+        if (index >= 0)
+        {
+            // Is this actually the device descriptor? Check a bunch of fields to see.
+            // The descriptors are slightly different between revisions, but this will
+            // check enough of the fields that we can be confident.
+            if (index >= 8 &&
+                index + 9 < firmware.length() &&
+                firmware.at(index - 8) == 0x12 && // Device descriptor length
+                firmware.at(index - 7) == 0x01 && // Device descriptor identifier
+                firmware.at(index - 4) == 0x02 && // Class = CDC communication device
+                firmware.at(index - 3) == 0x00 && // Subclass = 0
+                firmware.at(index - 2) == 0x00 && // Protocol = 0)
+                firmware.at(index + 6) == 0x01 && // Manufacturer string = 1
+                firmware.at(index + 7) == 0x02 && // Product string = 2
+                firmware.at(index + 9) == 0x01) // Num configurations = 1
+            {
+                // We're pretty sure it is. Let's extract the revision.
+                uint16_t revision = static_cast<uint8_t>(firmware.at(index + 4)) |
+                                    static_cast<uint8_t>(firmware.at(index + 5)) << 8;
+
+                // See if it matches the current programmer revision. Alternatively,
+                // if the current programmer revision is 0 it means we failed to detect it,
+                // and we should just let them attempt it anyway.
+                if (revision == p->programmerRevision() ||
+                    p->programmerRevision() == ProgrammerRevisionUnknown)
+                {
+                    return true;
+                }
+
+                // Count how many descriptors we found
+                descriptorsFound++;
+            }
+
+            index += 4;
+        }
+    } while (index >= 0);
+
+    if (descriptorsFound == 0)
+    {
+        compatibilityError = "The selected file doesn't appear to be a programmer firmware file.";
+    }
+    else
+    {
+        compatibilityError = "The selected file is a SIMM programmer firmware file, "
+                             "but it isn't compatible with your programmer.\n\n"
+                             "Please download the correct firmware file from: "
+                             "https://github.com/dougg3/mac-rom-simm-programmer/releases";
+    }
+    return false;
 }
