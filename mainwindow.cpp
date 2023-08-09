@@ -61,8 +61,7 @@ MainWindow::MainWindow(QWidget *parent) :
     writeFile(NULL),
     readFile(NULL),
     writeBuffer(NULL),
-    readBuffer(NULL),
-    compressedImageReceived(false)
+    readBuffer(NULL)
 {
     initializing = true;
     // Make default QSettings use these settings
@@ -981,6 +980,9 @@ void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
         // go ahead and save this as the new default.
         uint32_t saveValue = static_cast<uint32_t>(ui->simmCapacityBox->itemData(index).toUInt());
         settings.setValue(selectedCapacityKey, saveValue);
+
+        // This can affect the error status of the ROM creation section
+        updateCreateROMControlStatus();
     }
 }
 
@@ -1565,6 +1567,7 @@ void MainWindow::updateCreateROMControlStatus()
     QString diskImageError;
     bool baseROMValid = checkBaseROMValidity(baseROMError);
     bool diskImageValid = checkDiskImageValidity(diskImageError);
+    bool error = true;
 
     ui->writeCombinedFileToSIMMButton->setEnabled(baseROMValid && diskImageValid);
     ui->saveCombinedFileButton->setEnabled(baseROMValid && diskImageValid);
@@ -1577,9 +1580,73 @@ void MainWindow::updateCreateROMControlStatus()
     {
         ui->createROMErrorText->setText(diskImageError);
     }
+    else if (baseROMValid && diskImageValid)
+    {
+        QByteArray uncompressedImage = uncompressedDiskImage();
+        bool shouldCompress = checkBaseROMCompressionSupport();
+        error = false;
+        if (shouldCompress &&
+            !FC8Compressor::hashMatchesFile(compressedImageFileHash, uncompressedImage))
+        {
+            ui->createROMErrorText->setText("Compressing...");
+
+            // Run the compression in the background. When it completes, this will re-run.
+            compressImageInBackground(uncompressedImage, false);
+
+            // While it's compressing, we can't allow writing/saving
+            ui->writeCombinedFileToSIMMButton->setEnabled(false);
+            ui->saveCombinedFileButton->setEnabled(false);
+        }
+        else
+        {
+            QFileInfo baseRom(ui->chosenBaseROMFile->text());
+            qint64 size = baseRom.size();
+
+            if (shouldCompress)
+            {
+                size += compressedImage.length();
+            }
+            else
+            {
+                size += uncompressedImage.length();
+            }
+
+            QString prettySize = displayableFileSize(size);
+            if (shouldCompress)
+            {
+                prettySize += " (compressed)";
+            }
+
+            if (size > simmTable[ui->simmCapacityBox->currentIndex()].size * 1024)
+            {
+                // If the image is too big, it's an error
+                error = true;
+                ui->writeCombinedFileToSIMMButton->setEnabled(false);
+                ui->saveCombinedFileButton->setEnabled(false);
+                ui->createROMErrorText->setText("Total ROM Size is too big: " + prettySize);
+            }
+            else
+            {
+                ui->createROMErrorText->setText("Total ROM Size: " + prettySize);
+            }
+        }
+    }
     else
     {
+        // Something's not valid, but it's not a critical error.
+        // Typically means both files haven't been chosen yet.
         ui->createROMErrorText->setText("");
+        error = false;
+    }
+
+    // Show errors in red
+    if (error)
+    {
+        ui->createROMErrorText->setStyleSheet("color: red;");
+    }
+    else
+    {
+        ui->createROMErrorText->setStyleSheet("");
     }
 }
 
@@ -1705,36 +1772,17 @@ bool MainWindow::checkDiskImageValidity(QString &errorText)
     return true;
 }
 
-QByteArray MainWindow::diskImageToWrite()
+void MainWindow::compressImageInBackground(QByteArray uncompressedImage, bool blockUntilCompletion)
 {
-    const QString diskImageFileName = ui->chosenDiskImageFile->text();
-    QFile f(diskImageFileName);
-    if (!f.open(QFile::ReadOnly))
-    {
-        return QByteArray();
-    }
-    QByteArray uncompressedDiskImage = f.readAll();
-    f.close();
-
-    // If the selected ROM doesn't support compression, return it
-    if (!checkBaseROMCompressionSupport())
-    {
-        return uncompressedDiskImage;
-    }
-
-    // Otherwise, compress it first. Do this in a thread so that the UI doesn't
-    // hang up while it's compressing. We'll still block in this function, but we'll
-    // allow the main thread's event loop to continue running so that the UI can
-    // indicate that we're in the middle of compression.
-    compressedImageReceived = false;
+    // Set up a thread to do the compression in the background. It can take a few seconds.
     QThread *compressionThread = new QThread();
-    FC8Compressor *compressor = new FC8Compressor(uncompressedDiskImage);
+    FC8Compressor *compressor = new FC8Compressor(uncompressedImage);
     compressor->moveToThread(compressionThread);
     // When the compression finishes, save it in this object. Just doing this to make use of
     // cross-thread signal functionality.
-    connect(compressor, SIGNAL(compressionFinished(QByteArray)), this, SLOT(compressorThreadFinished(QByteArray)));
+    connect(compressor, SIGNAL(compressionFinished(QByteArray,QByteArray)), this, SLOT(compressorThreadFinished(QByteArray,QByteArray)));
     // When the compression finishes, delete the compressor
-    connect(compressor, SIGNAL(compressionFinished(QByteArray)), compressor, SLOT(deleteLater()));
+    connect(compressor, SIGNAL(compressionFinished(QByteArray,QByteArray)), compressor, SLOT(deleteLater()));
     // When the compressor is destroyed, stop the thread
     connect(compressor, SIGNAL(destroyed()), compressionThread, SLOT(quit()));
     // When the thread starts, start the compressor
@@ -1742,25 +1790,76 @@ QByteArray MainWindow::diskImageToWrite()
     // When the thread stops, it should destroy itself
     connect(compressionThread, SIGNAL(finished()), compressionThread, SLOT(deleteLater()));
 
-    // Show an indeterminate progress bar while compressing it. It can take a few seconds.
-    QWidget *prevPage = ui->pages->currentWidget();
-    ui->progressBar->setRange(0, 0);
-    ui->statusLabel->setText("Compressing disk image...");
-    ui->pages->setCurrentWidget(ui->statusPage);
-
-    // Run the compression in the background
     compressionThread->start();
-    while (!compressionThread->isFinished() || !compressedImageReceived)
-    {
-        qApp->processEvents();
-    }
-    // Restore the page we were on before
-    ui->pages->setCurrentWidget(prevPage);
 
-    // Reset the received flag and return the compressed data
-    // (might be empty if compression failed)
-    compressedImageReceived = false;
-    return compressedImage;
+    if (blockUntilCompletion)
+    {
+        QWidget *prevPage = ui->pages->currentWidget();
+        ui->progressBar->setRange(0, 0);
+        ui->statusLabel->setText("Compressing disk image...");
+        ui->pages->setCurrentWidget(ui->statusPage);
+
+        // Block until the compression is complete, showing a progress bar
+        while (!compressionThread->isFinished() ||
+               !FC8Compressor::hashMatchesFile(compressedImageFileHash, uncompressedImage))
+        {
+            qApp->processEvents();
+        }
+
+        // Restore the page we were on before
+        ui->pages->setCurrentWidget(prevPage);
+    }
+}
+
+QByteArray MainWindow::uncompressedDiskImage()
+{
+    const QString diskImageFileName = ui->chosenDiskImageFile->text();
+    QFile f(diskImageFileName);
+    if (!f.open(QFile::ReadOnly))
+    {
+        return QByteArray();
+    }
+    QByteArray data = f.readAll();
+    f.close();
+
+    return data;
+}
+
+QByteArray MainWindow::diskImageToWrite()
+{
+    QByteArray uncompressedImage = uncompressedDiskImage();
+
+    // If the selected ROM doesn't support compression, return it
+    if (!checkBaseROMCompressionSupport())
+    {
+        return uncompressedImage;
+    }
+
+    // Otherwise, return the compressed image which we should have already
+    // verified is good to go. Double check though...it's possible that the file
+    // changed underneath us, in which case we need to compress it again.
+    if (FC8Compressor::hashMatchesFile(compressedImageFileHash, uncompressedImage))
+    {
+        return compressedImage;
+    }
+    else
+    {
+        // It doesn't match, which means the filename hasn't changed but the
+        // content has changed since we last compressed it. Recompress it.
+        compressImageInBackground(uncompressedImage, true);
+
+        // Make sure it matches now
+        if (FC8Compressor::hashMatchesFile(compressedImageFileHash, uncompressedImage))
+        {
+            return compressedImage;
+        }
+        else
+        {
+            // Somehow we failed to recompress it; cause an error to be returned.
+            // Should never happen; just for safeguarding.
+            return QByteArray();
+        }
+    }
 }
 
 QByteArray MainWindow::createROM()
@@ -1784,6 +1883,34 @@ QByteArray MainWindow::createROM()
     finalImage += diskImage;
 
     return finalImage;
+}
+
+QString MainWindow::displayableFileSize(qint64 size)
+{
+    if (size < 1048576)
+    {
+        if (size % 1024 == 0)
+        {
+            return QString("%1 KB").arg(size / 1024);
+        }
+        else
+        {
+            float sizeF = static_cast<float>(size) / 1024.0f;
+            return QString("%1 KB").arg(sizeF, 0, 'f', 1);
+        }
+    }
+    else
+    {
+        if (size % 1048576 == 0)
+        {
+            return QString("%1 MB").arg(size / 1048576);
+        }
+        else
+        {
+            float sizeF = static_cast<float>(size) / 1048576.0f;
+            return QString("%1 MB").arg(sizeF, 0, 'f', 1);
+        }
+    }
 }
 
 void MainWindow::on_writeCombinedFileToSIMMButton_clicked()
@@ -1833,8 +1960,9 @@ void MainWindow::on_saveCombinedFileButton_clicked()
     }
 }
 
-void MainWindow::compressorThreadFinished(QByteArray compressedData)
+void MainWindow::compressorThreadFinished(QByteArray hashOfOriginal, QByteArray compressedData)
 {
+    compressedImageFileHash = hashOfOriginal;
     compressedImage = compressedData;
-    compressedImageReceived = true;
+    updateCreateROMControlStatus();
 }

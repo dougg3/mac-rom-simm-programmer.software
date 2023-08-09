@@ -108,7 +108,7 @@ private slots:
     void on_writeCombinedFileToSIMMButton_clicked();
     void on_saveCombinedFileButton_clicked();
 
-    void compressorThreadFinished(QByteArray compressedData);
+    void compressorThreadFinished(QByteArray hashOfOriginal, QByteArray compressedData);
 
 private:
     Ui::MainWindow *ui;
@@ -118,8 +118,8 @@ private:
     QString electricalTestString;
     QBuffer *writeBuffer;
     QBuffer *readBuffer;
+    QByteArray compressedImageFileHash;
     QByteArray compressedImage;
-    bool compressedImageReceived;
 
     void resetAndShowStatusPage();
     void handleVerifyFailureReply();
@@ -132,8 +132,11 @@ private:
     bool checkBaseROMValidity(QString &errorText);
     bool checkBaseROMCompressionSupport();
     bool checkDiskImageValidity(QString &errorText);
+    void compressImageInBackground(QByteArray uncompressedImage, bool blockUntilCompletion);
+    QByteArray uncompressedDiskImage();
     QByteArray diskImageToWrite();
     QByteArray createROM();
+    QString displayableFileSize(qint64 size);
 };
 
 #endif // MAINWINDOW_H

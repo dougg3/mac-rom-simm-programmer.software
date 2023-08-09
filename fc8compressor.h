@@ -11,9 +11,10 @@ public:
 
 public slots:
     void doCompression();
+    static bool hashMatchesFile(QByteArray const &hash, QByteArray const &file);
 
 signals:
-    void compressionFinished(QByteArray compressedData);
+    void compressionFinished(QByteArray hashOfOriginal, QByteArray compressedData);
 
 private:
     QByteArray _data;
