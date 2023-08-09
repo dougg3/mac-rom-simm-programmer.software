@@ -71,33 +71,29 @@
           </property>
           <layout class="QVBoxLayout" name="verticalLayout_8">
            <item>
-            <layout class="QHBoxLayout" name="horizontalLayout_7">
-             <item>
-              <widget class="QLineEdit" name="chosenBaseROMFile">
-               <property name="readOnly">
-                <bool>false</bool>
-               </property>
-              </widget>
-             </item>
-             <item>
+            <layout class="QGridLayout" name="gridLayout">
+             <item row="0" column="1">
               <widget class="QPushButton" name="selectBaseROMButton">
                <property name="text">
                 <string>Select base ROM...</string>
                </property>
               </widget>
              </item>
-            </layout>
-           </item>
-           <item>
-            <layout class="QHBoxLayout" name="horizontalLayout_8">
-             <item>
+             <item row="0" column="0">
+              <widget class="QLineEdit" name="chosenBaseROMFile">
+               <property name="readOnly">
+                <bool>false</bool>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
               <widget class="QLineEdit" name="chosenDiskImageFile">
                <property name="readOnly">
                 <bool>false</bool>
                </property>
               </widget>
              </item>
-             <item>
+             <item row="1" column="1">
               <widget class="QPushButton" name="selectDiskImageButton">
                <property name="text">
                 <string>Select disk image...</string>
@@ -671,7 +667,7 @@
      <x>0</x>
      <y>0</y>
      <width>557</width>
-     <height>22</height>
+     <height>21</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
