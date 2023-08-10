@@ -74,6 +74,7 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->setupUi(this);
     hideFlashIndividualControls();
     ui->pages->setCurrentWidget(ui->notConnectedPage);
+    ui->tabWidget->setCurrentWidget(ui->writeTab);
     ui->actionUpdate_firmware->setEnabled(false);
 
     // Fill in the list of SIMM chip capacities (programmer can support anywhere up to 8 MB of space)
