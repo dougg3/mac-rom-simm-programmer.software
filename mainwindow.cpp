@@ -1902,7 +1902,7 @@ void MainWindow::compressImageInBackground(QByteArray uncompressedImage, bool bl
 {
     // Set up a thread to do the compression in the background. It can take a few seconds.
     QThread *compressionThread = new QThread();
-    FC8Compressor *compressor = new FC8Compressor(uncompressedImage);
+    FC8Compressor *compressor = new FC8Compressor(uncompressedImage, 65536);
     compressor->moveToThread(compressionThread);
     // When the compression finishes, save it in this object. Just doing this to make use of
     // cross-thread signal functionality.
