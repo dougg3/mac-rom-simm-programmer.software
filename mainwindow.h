@@ -87,8 +87,10 @@ private slots:
     void on_actionAbout_SIMM_Programmer_triggered();
 
     void on_verifyBox_currentIndexChanged(int index);
+    void on_createVerifyBox_currentIndexChanged(int index);
 
     void on_howMuchToWriteBox_currentIndexChanged(int index);
+    void on_createHowMuchToWriteBox_currentIndexChanged(int index);
 
     void on_flashIndividualEnterButton_clicked();
     void on_returnNormalButton_clicked();

@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>459</width>
+    <width>500</width>
     <height>280</height>
    </rect>
   </property>
@@ -124,10 +124,24 @@
                <item>
                 <layout class="QHBoxLayout" name="horizontalLayout_2">
                  <item>
-                  <widget class="QComboBox" name="verifyBox"/>
+                  <widget class="QComboBox" name="verifyBox">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                  </widget>
                  </item>
                  <item>
-                  <widget class="QComboBox" name="howMuchToWriteBox"/>
+                  <widget class="QComboBox" name="howMuchToWriteBox">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                  </widget>
                  </item>
                  <item>
                   <spacer name="horizontalSpacer_2">
@@ -230,12 +244,22 @@
                <item>
                 <layout class="QHBoxLayout" name="horizontalLayout_9">
                  <item>
-                  <widget class="QLabel" name="createROMErrorText">
-                   <property name="styleSheet">
-                    <string notr="true">color: red;</string>
+                  <widget class="QComboBox" name="createVerifyBox">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
                    </property>
-                   <property name="text">
-                    <string>TextLabel</string>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QComboBox" name="createHowMuchToWriteBox">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
                    </property>
                   </widget>
                  </item>
@@ -267,6 +291,16 @@
                   </widget>
                  </item>
                 </layout>
+               </item>
+               <item>
+                <widget class="QLabel" name="createROMErrorText">
+                 <property name="styleSheet">
+                  <string notr="true">color: red;</string>
+                 </property>
+                 <property name="text">
+                  <string>TextLabel</string>
+                 </property>
+                </widget>
                </item>
                <item>
                 <spacer name="verticalSpacer">

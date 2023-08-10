@@ -92,9 +92,15 @@ MainWindow::MainWindow(QWidget *parent) :
     }
 
     // Fill in the list of verification options
-    ui->verifyBox->addItem("Don't verify", QVariant(NoVerification));
-    ui->verifyBox->addItem("Verify while writing", QVariant(VerifyWhileWriting));
-    ui->verifyBox->addItem("Verify after writing", QVariant(VerifyAfterWrite));
+    QList<QComboBox *> verifyBoxes;
+    verifyBoxes << ui->verifyBox;
+    verifyBoxes << ui->createVerifyBox;
+    foreach (QComboBox *verifyBox, verifyBoxes)
+    {
+        verifyBox->addItem("Don't verify", QVariant(NoVerification));
+        verifyBox->addItem("Verify while writing", QVariant(VerifyWhileWriting));
+        verifyBox->addItem("Verify after writing", QVariant(VerifyAfterWrite));
+    }
 
     // Decide whether to verify while writing, after writing, or never.
     // This would probably be better suited as an enum rather than multiple bools,
@@ -118,25 +124,37 @@ MainWindow::MainWindow(QWidget *parent) :
 
     if (selectedIndex != -1)
     {
-        ui->verifyBox->setCurrentIndex(selectedIndex);
+        foreach (QComboBox *verifyBox, verifyBoxes)
+        {
+            verifyBox->setCurrentIndex(selectedIndex);
+        }
     }
 
     // Fill in list of "write first xxx bytes" options
-    ui->howMuchToWriteBox->addItem("Erase/write entire SIMM", QVariant(0));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 256 KB", QVariant(256*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 512 KB", QVariant(512*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 1 MB", QVariant(1024*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 1.5 MB", QVariant(3*512*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 2 MB", QVariant(2*1024*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 4 MB", QVariant(4*1024*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 8 MB", QVariant(8*1024*1024));
+    QList<QComboBox *> howMuchToWriteBoxes;
+    howMuchToWriteBoxes << ui->howMuchToWriteBox;
+    howMuchToWriteBoxes << ui->createHowMuchToWriteBox;
+    foreach (QComboBox *howMuchToWriteBox, howMuchToWriteBoxes)
+    {
+        howMuchToWriteBox->addItem("Erase/write entire SIMM", QVariant(0));
+        howMuchToWriteBox->addItem("Only erase/write first 256 KB", QVariant(256*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 512 KB", QVariant(512*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 1 MB", QVariant(1024*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 1.5 MB", QVariant(3*512*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 2 MB", QVariant(2*1024*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 4 MB", QVariant(4*1024*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 8 MB", QVariant(8*1024*1024));
+    }
 
     // Select "erase entire SIMM" by default, or load last-used setting
     QVariant selectedEraseSize = settings.value(selectedEraseSizeKey, QVariant(0));
     selectedIndex = ui->howMuchToWriteBox->findData(selectedEraseSize);
     if (selectedIndex != -1)
     {
-        ui->howMuchToWriteBox->setCurrentIndex(selectedIndex);
+        foreach (QComboBox *howMuchToWriteBox, howMuchToWriteBoxes)
+        {
+            howMuchToWriteBox->setCurrentIndex(selectedIndex);
+        }
     }
 
     ui->chosenWriteFile->setText("");
@@ -1062,6 +1080,21 @@ void MainWindow::on_verifyBox_currentIndexChanged(int index)
             settings.setValue(verifyAfterWriteKey, false);
             settings.setValue(verifyWhileWritingKey, true);
         }
+
+        // Update the other combo box without allowing it to emit a signal
+        ui->createVerifyBox->blockSignals(true);
+        ui->createVerifyBox->setCurrentIndex(index);
+        ui->createVerifyBox->blockSignals(false);
+    }
+}
+
+void MainWindow::on_createVerifyBox_currentIndexChanged(int index)
+{
+    // Update the index on the main control, which will actually apply
+    // the change to the setting.
+    if (!initializing)
+    {
+        ui->verifyBox->setCurrentIndex(index);
     }
 }
 
@@ -1077,6 +1110,21 @@ void MainWindow::on_howMuchToWriteBox_currentIndexChanged(int index)
         // If we're not initializing (it gets called while we're initializing),
         // go ahead and save this as the new default.
         settings.setValue(selectedEraseSizeKey, newEraseSize);
+
+        // Update the other combo box without allowing it to emit a signal
+        ui->createHowMuchToWriteBox->blockSignals(true);
+        ui->createHowMuchToWriteBox->setCurrentIndex(index);
+        ui->createHowMuchToWriteBox->blockSignals(false);
+    }
+}
+
+void MainWindow::on_createHowMuchToWriteBox_currentIndexChanged(int index)
+{
+    // Update the index on the main control, which will actually apply
+    // the change to the setting.
+    if (!initializing)
+    {
+        ui->howMuchToWriteBox->setCurrentIndex(index);
     }
 }
 
