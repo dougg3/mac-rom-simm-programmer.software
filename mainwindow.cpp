@@ -439,9 +439,8 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
             writeFile = NULL;
         }
 
-        QMessageBox::information(this, "Write complete", "The write operation finished.");
-
         returnToControlPage();
+        QMessageBox::information(this, "Write complete", "The write operation finished.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -457,9 +456,8 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
             writeFile = NULL;
         }
 
-        QMessageBox::information(this, "Write complete", "The write operation finished, and the contents were verified successfully.");
-
         returnToControlPage();
+        QMessageBox::information(this, "Write complete", "The write operation finished, and the contents were verified successfully.");
         if (writeBuffer)
         {
             writeBuffer->close();
