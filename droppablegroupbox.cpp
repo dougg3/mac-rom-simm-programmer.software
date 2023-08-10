@@ -2,6 +2,7 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QDebug>
+#include <QUrl>
 
 DroppableGroupBox::DroppableGroupBox(QWidget *parent) :
     QGroupBox(parent)
