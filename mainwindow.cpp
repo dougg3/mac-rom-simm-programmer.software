@@ -61,7 +61,8 @@ MainWindow::MainWindow(QWidget *parent) :
     writeFile(NULL),
     readFile(NULL),
     writeBuffer(NULL),
-    readBuffer(NULL)
+    readBuffer(NULL),
+    activeMessageBox(NULL)
 {
     initializing = true;
     // Make default QSettings use these settings
@@ -440,7 +441,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::information(this, "Write complete", "The write operation finished.");
+        showMessageBox(QMessageBox::Information, "Write complete", "The write operation finished.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -457,7 +458,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::information(this, "Write complete", "The write operation finished, and the contents were verified successfully.");
+        showMessageBox(QMessageBox::Information, "Write complete", "The write operation finished, and the contents were verified successfully.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -480,7 +481,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Verify error", "An error occurred reading the SIMM contents for verification.");
+        showMessageBox(QMessageBox::Warning, "Verify error", "An error occurred reading the SIMM contents for verification.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -497,7 +498,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Verify cancelled", "The verify operation was cancelled.");
+        showMessageBox(QMessageBox::Warning, "Verify cancelled", "The verify operation was cancelled.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -514,7 +515,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Verify timed out", "The verify operation timed out.");
+        showMessageBox(QMessageBox::Warning, "Verify timed out", "The verify operation timed out.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -549,7 +550,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Write error", "An error occurred writing to the SIMM.");
+        showMessageBox(QMessageBox::Warning, "Write error", "An error occurred writing to the SIMM.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -566,7 +567,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
+        showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -583,7 +584,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support the \"verify while writing\" capability. Please update the firmware and try again.");
+        showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support the \"verify while writing\" capability. Please update the firmware and try again.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -600,7 +601,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support the \"erase only a portion of the SIMM\" capability. Please update the firmware and try again.");
+        showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support the \"erase only a portion of the SIMM\" capability. Please update the firmware and try again.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -617,7 +618,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support the \"program individual chips\" capability. Please update the firmware and try again.");
+        showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support the \"program individual chips\" capability. Please update the firmware and try again.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -634,7 +635,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Write cancelled", "The write operation was cancelled.");
+        showMessageBox(QMessageBox::Warning, "Write cancelled", "The write operation was cancelled.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -654,7 +655,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Write error", "An error occurred erasing the SIMM.");
+        showMessageBox(QMessageBox::Warning, "Write error", "An error occurred erasing the SIMM.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -671,7 +672,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Write timed out", "The write operation timed out.");
+        showMessageBox(QMessageBox::Warning, "Write timed out", "The write operation timed out.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -688,7 +689,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "File too big", "The file you chose to write to the SIMM is too big according to the chip size you have selected.");
+        showMessageBox(QMessageBox::Warning, "File too big", "The file you chose to write to the SIMM is too big according to the chip size you have selected.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -705,7 +706,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Bad erase size", "The programmer cannot handle the erase size you chose.");
+        showMessageBox(QMessageBox::Warning, "Bad erase size", "The programmer cannot handle the erase size you chose.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -753,19 +754,19 @@ void MainWindow::programmerElectricalTestStatusChanged(ElectricalTestStatus newS
         break;
     case ElectricalTestPassed:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::information(this, "Test passed", "The electrical test passed successfully.");
+        showMessageBox(QMessageBox::Information, "Test passed", "The electrical test passed successfully.");
         break;
     case ElectricalTestFailed:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Test failed", "The electrical test failed:\n\n" + electricalTestString);
+        showMessageBox(QMessageBox::Warning, "Test failed", "The electrical test failed:\n\n" + electricalTestString);
         break;
     case ElectricalTestTimedOut:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Test timed out", "The electrical test operation timed out.");
+        showMessageBox(QMessageBox::Warning, "Test timed out", "The electrical test operation timed out.");
         break;
     case ElectricalTestCouldntStart:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Communication error", "Unable to communicate with programmer board.");
+        showMessageBox(QMessageBox::Warning, "Communication error", "Unable to communicate with programmer board.");
         break;
     }
 }
@@ -803,7 +804,7 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::information(this, "Read complete", "The read operation finished.");
+        showMessageBox(QMessageBox::Information, "Read complete", "The read operation finished.");
         if (readBuffer)
         {
             delete readBuffer;
@@ -819,7 +820,7 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Read error", "An error occurred reading from the SIMM.");
+        showMessageBox(QMessageBox::Warning, "Read error", "An error occurred reading from the SIMM.");
         if (readBuffer)
         {
             delete readBuffer;
@@ -835,7 +836,7 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Read cancelled", "The read operation was cancelled.");
+        showMessageBox(QMessageBox::Warning, "Read cancelled", "The read operation was cancelled.");
         if (readBuffer)
         {
             delete readBuffer;
@@ -851,7 +852,7 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Read timed out", "The read operation timed out.");
+        showMessageBox(QMessageBox::Warning, "Read timed out", "The read operation timed out.");
         if (readBuffer)
         {
             delete readBuffer;
@@ -914,20 +915,20 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
             }
         }
 
-        QMessageBox::information(this, "Identification complete", identifyString);
+        showMessageBox(QMessageBox::Information, "Identification complete", identifyString);
         break;
     }
     case IdentificationError:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Identification error", "An error occurred identifying the chips on the SIMM.");
+        showMessageBox(QMessageBox::Warning, "Identification error", "An error occurred identifying the chips on the SIMM.");
         break;
     case IdentificationTimedOut:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Identification timed out", "The identification operation timed out.");
+        showMessageBox(QMessageBox::Warning, "Identification timed out", "The identification operation timed out.");
         break;
     case IdentificationNeedsFirmwareUpdate:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
+        showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
         break;
     }
 }
@@ -941,19 +942,19 @@ void MainWindow::programmerFirmwareFlashStatusChanged(FirmwareFlashStatus newSta
         break;
     case FirmwareFlashComplete:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::information(this, "Firmware update complete", "The firmware update operation finished.");
+        showMessageBox(QMessageBox::Information, "Firmware update complete", "The firmware update operation finished.");
         break;
     case FirmwareFlashError:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Firmware update error", "An error occurred writing firmware to the device.");
+        showMessageBox(QMessageBox::Warning, "Firmware update error", "An error occurred writing firmware to the device.");
         break;
     case FirmwareFlashCancelled:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Firmware update cancelled", "The firmware update was cancelled.");
+        showMessageBox(QMessageBox::Warning, "Firmware update cancelled", "The firmware update was cancelled.");
         break;
     case FirmwareFlashTimedOut:
         ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Firmware update timed out", "The firmware update operation timed out.");
+        showMessageBox(QMessageBox::Warning, "Firmware update timed out", "The firmware update operation timed out.");
         break;
     }
 }
@@ -983,7 +984,7 @@ void MainWindow::on_actionUpdate_firmware_triggered()
         }
         else
         {
-            QMessageBox::warning(this, "Invalid firmware file", compatibilityError);
+            showMessageBox(QMessageBox::Warning, "Invalid firmware file", compatibilityError);
         }
     }
 }
@@ -1002,6 +1003,12 @@ void MainWindow::programmerBoardConnected()
 
 void MainWindow::programmerBoardDisconnected()
 {
+    // If a message box currently visible, dismiss it
+    if (activeMessageBox)
+    {
+        activeMessageBox->close();
+        messageBoxFinished();
+    }
     ui->pages->setCurrentWidget(ui->notConnectedPage);
     ui->actionUpdate_firmware->setEnabled(false);
 }
@@ -1023,7 +1030,7 @@ void MainWindow::programmerBoardDisconnectedDuringOperation()
         delete readFile;
         readFile = NULL;
     }
-    QMessageBox::warning(this, "Programmer lost connection", "Lost contact with the programmer board. Unplug it, plug it back in, and try again.");
+    showMessageBox(QMessageBox::Warning, "Programmer lost connection", "Lost contact with the programmer board. Unplug it, plug it back in, and try again.");
 }
 
 void MainWindow::resetAndShowStatusPage()
@@ -1156,7 +1163,7 @@ void MainWindow::handleVerifyFailureReply()
     }
 
     returnToControlPage();
-    QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it. Bad data on chips: " + icList);
+    showMessageBox(QMessageBox::Warning, "Verify error", "The data read back from the SIMM did not match the data written to it. Bad data on chips: " + icList);
 }
 
 void MainWindow::on_flashIndividualEnterButton_clicked()
@@ -2044,7 +2051,7 @@ void MainWindow::on_writeCombinedFileToSIMMButton_clicked()
     QByteArray dataToWrite = createROM();
     if (dataToWrite.isEmpty())
     {
-        QMessageBox::warning(this, "Error combining files", "The ROM and disk image were unable to be combined. Make sure you chose the correct files.");
+        showMessageBox(QMessageBox::Warning, "Error combining files", "The ROM and disk image were unable to be combined. Make sure you chose the correct files.");
         return;
     }
 
@@ -2058,7 +2065,7 @@ void MainWindow::on_saveCombinedFileButton_clicked()
     QByteArray dataToWrite = createROM();
     if (dataToWrite.isEmpty())
     {
-        QMessageBox::warning(this, "Error combining files", "The ROM and disk image were unable to be combined. Make sure you chose the correct files.");
+        showMessageBox(QMessageBox::Warning, "Error combining files", "The ROM and disk image were unable to be combined. Make sure you chose the correct files.");
         return;
     }
 
@@ -2068,7 +2075,7 @@ void MainWindow::on_saveCombinedFileButton_clicked()
         QFile f(filename);
         if (!f.open(QFile::WriteOnly))
         {
-            QMessageBox::warning(this, "Error opening output file", "Unable to open file for writing. Make sure you have correct file permissions.");
+            showMessageBox(QMessageBox::Warning, "Error opening output file", "Unable to open file for writing. Make sure you have correct file permissions.");
             return;
         }
 
@@ -2077,11 +2084,11 @@ void MainWindow::on_saveCombinedFileButton_clicked()
 
         if (success)
         {
-            QMessageBox::information(this, "Save complete", "The combined ROM image was saved successfully.");
+            showMessageBox(QMessageBox::Information, "Save complete", "The combined ROM image was saved successfully.");
         }
         else
         {
-            QMessageBox::warning(this, "Error writing output file", "Unable to save combined ROM image.");
+            showMessageBox(QMessageBox::Warning, "Error writing output file", "Unable to save combined ROM image.");
         }
     }
 }
@@ -2163,4 +2170,25 @@ bool MainWindow::firmwareIsCompatible(QString filename, QString &compatibilityEr
                              "https://github.com/dougg3/mac-rom-simm-programmer/releases";
     }
     return false;
+}
+
+void MainWindow::showMessageBox(QMessageBox::Icon icon, const QString &title, const QString &text)
+{
+    // We can't show multiple message boxes
+    if (activeMessageBox) { return; }
+
+    // Show the message box as a modal dialog, connect so we get notified when they click OK
+    activeMessageBox = new QMessageBox(icon, title, text, QMessageBox::Ok, this);
+    connect(activeMessageBox, SIGNAL(finished(int)), this, SLOT(messageBoxFinished()));
+    activeMessageBox->setModal(true);
+    activeMessageBox->open();
+}
+
+void MainWindow::messageBoxFinished()
+{
+    if (activeMessageBox)
+    {
+        activeMessageBox->deleteLater();
+        activeMessageBox = NULL;
+    }
 }

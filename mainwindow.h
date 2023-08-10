@@ -22,6 +22,7 @@
 
 #include <QMainWindow>
 #include <QFile>
+#include <QMessageBox>
 #include "programmer.h"
 
 namespace Ui {
@@ -113,6 +114,8 @@ private slots:
 
     void compressorThreadFinished(QByteArray hashOfOriginal, QByteArray compressedData);
 
+    void messageBoxFinished();
+
 private:
     Ui::MainWindow *ui;
     bool initializing;
@@ -123,6 +126,7 @@ private:
     QBuffer *readBuffer;
     QByteArray compressedImageFileHash;
     QByteArray compressedImage;
+    QMessageBox *activeMessageBox;
 
     void resetAndShowStatusPage();
     void handleVerifyFailureReply();
@@ -143,6 +147,8 @@ private:
     QString displayableFileSize(qint64 size);
 
     bool firmwareIsCompatible(QString filename, QString &compatibilityError);
+
+    void showMessageBox(QMessageBox::Icon icon, const QString &title, const QString &text);
 };
 
 #endif // MAINWINDOW_H
