@@ -49,6 +49,7 @@ private slots:
 
     void on_writeGroupBox_fileDropped(const QString &filePath);
     void on_readGroupBox_fileDropped(const QString &filePath);
+    void on_createROMGroupBox_fileDropped(const QString &filePath);
 
     void programmerWriteStatusChanged(WriteStatus newStatus);
     void programmerWriteTotalLengthChanged(uint32_t totalLen);

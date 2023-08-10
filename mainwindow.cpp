@@ -150,6 +150,8 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->writeCombinedFileToSIMMButton->setEnabled(false);
     ui->saveCombinedFileButton->setEnabled(false);
     ui->createROMErrorText->setText("");
+    // Allow dropping a ROM and disk image simultaneously
+    ui->createROMGroupBox->setMaxFiles(2);
 
     connect(p, SIGNAL(writeStatusChanged(WriteStatus)), SLOT(programmerWriteStatusChanged(WriteStatus)));
     connect(p, SIGNAL(writeTotalLengthChanged(uint32_t)), SLOT(programmerWriteTotalLengthChanged(uint32_t)));
@@ -358,6 +360,43 @@ void MainWindow::on_readGroupBox_fileDropped(const QString &filePath)
 {
     ui->chosenReadFile->setText(filePath);
     on_chosenReadFile_textEdited(filePath);
+}
+
+void MainWindow::on_createROMGroupBox_fileDropped(const QString &filePath)
+{
+    // It could be a base ROM or a disk image.
+    QFile droppedFile(filePath);
+    if (!droppedFile.open(QFile::ReadOnly))
+    {
+        return;
+    }
+
+    // Let's see what type of file it is.
+    QByteArray data = droppedFile.read(0x1708);
+    droppedFile.close();
+
+    if (data.length() != 0x1708)
+    {
+        // It's too short to be anything! Bail!
+        return;
+    }
+
+    // Is it a ROM? Do a very simplified check similar to checkBaseROMValidity()
+    if ((data.at(0x1706) == 0x4E && data.at(0x1707) == 0x75) ||
+        (data.at(0x1706) == 0x67))
+    {
+        ui->chosenBaseROMFile->setText(filePath);
+        on_chosenBaseROMFile_textEdited(filePath);
+    }
+    // Not a ROM; it might be a disk image. Look for compressed disk image header
+    // or HFS to get an idea about what's going on.
+    else if (data.startsWith(QByteArray("FC8", 3)) ||
+             (data.at(1024) == 'B' && data.at(1025) == 'D'))
+    {
+        ui->chosenDiskImageFile->setText(filePath);
+        on_chosenDiskImageFile_textEdited(filePath);
+    }
+    // Let's just silently ignore the dropped if it's not one of these.
 }
 
 void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
