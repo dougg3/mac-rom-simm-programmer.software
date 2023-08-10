@@ -35,6 +35,7 @@ static Programmer *p;
 #define verifyAfterWriteKey     "verifyAfterWrite"
 #define verifyWhileWritingKey   "verifyWhileWriting"
 #define selectedEraseSizeKey    "selectedEraseSize"
+#define extendedViewKey         "extendedView"
 
 struct SIMMDesc {
     uint32_t saveValue;
@@ -73,6 +74,13 @@ MainWindow::MainWindow(QWidget *parent) :
 
     p = new Programmer();
     ui->setupUi(this);
+
+    if (settings.value(extendedViewKey, false).toBool())
+    {
+        setUseExtendedUI(true);
+        ui->actionExtended_UI->setChecked(true);
+    }
+
     hideFlashIndividualControls();
     ui->pages->setCurrentWidget(ui->notConnectedPage);
     ui->tabWidget->setCurrentWidget(ui->writeTab);
@@ -2190,5 +2198,51 @@ void MainWindow::messageBoxFinished()
     {
         activeMessageBox->deleteLater();
         activeMessageBox = NULL;
+    }
+}
+
+void MainWindow::on_actionExtended_UI_triggered(bool checked)
+{
+    setUseExtendedUI(checked);
+}
+
+void MainWindow::setUseExtendedUI(bool extended)
+{
+    const bool alreadyExtended = ui->tabWidget->isHidden();
+    if (extended == alreadyExtended) { return; }
+
+    if (extended)
+    {
+        // Put everything on one page
+        ui->controlLayout->insertWidget(1, ui->createROMGroupBox);
+        ui->controlLayout->insertWidget(2, ui->writeGroupBox);
+        ui->controlLayout->insertWidget(3, ui->readGroupBox);
+        ui->writeGroupBox->setTitle(ui->tabWidget->tabText(0));
+        ui->createROMGroupBox->setTitle(ui->tabWidget->tabText(1));
+        ui->readGroupBox->setTitle(ui->tabWidget->tabText(2));
+        ui->tabWidget->hide();
+        ui->createVerifyBox->hide();
+        ui->createHowMuchToWriteBox->hide();
+        ui->createButtonsLayout->insertWidget(0, ui->createROMErrorText);
+    }
+    else
+    {
+        // Restore widgets to the original layout in the UI file
+        ui->createTabLayout->insertWidget(0, ui->createROMGroupBox);
+        ui->writeTabLayout->insertWidget(0, ui->writeGroupBox);
+        ui->readTabLayout->insertWidget(0, ui->readGroupBox);
+        ui->writeGroupBox->setTitle("");
+        ui->createROMGroupBox->setTitle("");
+        ui->readGroupBox->setTitle("");
+        ui->tabWidget->show();
+        ui->createVerifyBox->show();
+        ui->createHowMuchToWriteBox->show();
+        ui->createROMGroupLayout->insertWidget(2, ui->createROMErrorText);
+    }
+
+    if (!initializing)
+    {
+        QSettings settings;
+        settings.setValue(extendedViewKey, extended);
     }
 }

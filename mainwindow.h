@@ -116,6 +116,8 @@ private slots:
 
     void messageBoxFinished();
 
+    void on_actionExtended_UI_triggered(bool checked);
+
 private:
     Ui::MainWindow *ui;
     bool initializing;
@@ -149,6 +151,7 @@ private:
     bool firmwareIsCompatible(QString filename, QString &compatibilityError);
 
     void showMessageBox(QMessageBox::Icon icon, const QString &title, const QString &text);
+    void setUseExtendedUI(bool extended);
 };
 
 #endif // MAINWINDOW_H
