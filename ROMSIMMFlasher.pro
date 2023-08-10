@@ -11,13 +11,17 @@ TEMPLATE = app
 QMAKE_TARGET_BUNDLE_PREFIX = com.downtowndougbrown
 
 SOURCES += main.cpp\
+    3rdparty/fc8-compression.c \
     droppablegroupbox.cpp \
-        mainwindow.cpp \
+    fc8compressor.cpp \
+    mainwindow.cpp \
     programmer.cpp \
     aboutbox.cpp
 
 HEADERS  += mainwindow.h \
+    3rdparty/fc8-compression/fc8.h \
     droppablegroupbox.h \
+    fc8compressor.h \
     programmer.h \
     aboutbox.h
 
