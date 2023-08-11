@@ -12,6 +12,7 @@ QMAKE_TARGET_BUNDLE_PREFIX = com.downtowndougbrown
 
 SOURCES += main.cpp\
     3rdparty/fc8-compression.c \
+    chipid.cpp \
     droppablegroupbox.cpp \
     fc8compressor.cpp \
     mainwindow.cpp \
@@ -20,6 +21,7 @@ SOURCES += main.cpp\
 
 HEADERS  += mainwindow.h \
     3rdparty/fc8-compression/fc8.h \
+    chipid.h \
     droppablegroupbox.h \
     fc8compressor.h \
     programmer.h \
