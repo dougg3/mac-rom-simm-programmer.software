@@ -147,6 +147,7 @@ public:
     VerificationOption verifyMode() const;
     uint8_t verifyBadChipMask() const { return _verifyBadChipMask; }
     ProgrammerRevision programmerRevision() const;
+    bool selectedSIMMTypeUsesShiftedUnlock() const;
 signals:
     void startStatusChanged(StartStatus status);
 
@@ -200,9 +201,10 @@ private:
     uint32_t lenRemaining;
     uint32_t readOffset;
 
-    int identificationCounter;
-    uint8_t chipManufacturerIDs[4];
-    uint8_t chipDeviceIDs[4];
+    int identificationShiftCounter;
+    int identificationReadCounter;
+    uint8_t chipManufacturerIDs[2][4];
+    uint8_t chipDeviceIDs[2][4];
 
     uint16_t detectedDeviceRevision;
     uint32_t firmwareLenRemaining;

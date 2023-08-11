@@ -1190,9 +1190,12 @@ void Programmer::handleChar(uint8_t c)
         if (c == CommandReplyOK)
         {
             // Good to go, now waiting for identification data
-            emit identificationStatusChanged(IdentificationStarting);
+            if (identificationShiftCounter == 0)
+            {   // If this is the first identification attempt, emit the signal
+                emit identificationStatusChanged(IdentificationStarting);
+            }
             curState = IdentificationWaitingData;
-            identificationCounter = 0;
+            identificationReadCounter = 0;
         }
         else
         {
@@ -1205,17 +1208,17 @@ void Programmer::handleChar(uint8_t c)
 
     // Expecting device/manufacturer info about the chips
     case IdentificationWaitingData:
-        if (identificationCounter & 1) // device ID?
+        if (identificationReadCounter & 1) // device ID?
         {
-            chipDeviceIDs[identificationCounter/2] = c;
+            chipDeviceIDs[identificationShiftCounter][identificationReadCounter/2] = c;
         }
         else // manufacturer ID?
         {
-            chipManufacturerIDs[identificationCounter/2] = c;
+            chipManufacturerIDs[identificationShiftCounter][identificationReadCounter/2] = c;
         }
 
         // All done?
-        if (++identificationCounter >= 8)
+        if (++identificationReadCounter >= 8)
         {
             curState = IdentificationAwaitingDoneReply;
         }
@@ -1223,15 +1226,25 @@ void Programmer::handleChar(uint8_t c)
 
     // Expecting final done confirmation after receiving all device/manufacturer info
     case IdentificationAwaitingDoneReply:
-        curState = WaitingForNextCommand;
-        closePort();
-        if (c == ProgrammerIdentifyDone)
+        if (++identificationShiftCounter >= 2)
         {
-            emit identificationStatusChanged(IdentificationComplete);
+            curState = WaitingForNextCommand;
+            closePort();
+            if (c == ProgrammerIdentifyDone)
+            {
+                emit identificationStatusChanged(IdentificationComplete);
+            }
+            else
+            {
+                emit identificationStatusChanged(IdentificationError);
+            }
         }
         else
         {
-            emit identificationStatusChanged(IdentificationError);
+            // Now we need to do the shifted version, so do another whole identification cycle
+            // with the other shift state
+            curState = IdentificationWaitingSetSizeReply;
+            sendByte(SetSIMMLayout_AddressShifted);
         }
         break;
 
@@ -1410,26 +1423,17 @@ QString Programmer::electricalTestPinName(uint8_t index)
 
 void Programmer::identifySIMMChips()
 {
-    //startProgrammerCommand(IdentifyChips, IdentificationAwaitingOKReply);
-    // Based on the SIMM type, tell the programmer board.
-    uint8_t setLayoutCommand;
-    if (SIMMChip() == SIMM_TSOP_x8)
-    {
-        setLayoutCommand = SetSIMMLayout_AddressShifted;
-    }
-    else
-    {
-        setLayoutCommand = SetSIMMLayout_AddressStraight;
-    }
-    startProgrammerCommand(setLayoutCommand, IdentificationWaitingSetSizeReply);
+    // Start with straight addresses
+    identificationShiftCounter = 0;
+    startProgrammerCommand(SetSIMMLayout_AddressStraight, IdentificationWaitingSetSizeReply);
 }
 
 void Programmer::getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device)
 {
     if ((chipIndex >= 0) && (chipIndex < 4))
     {
-        *manufacturer = chipManufacturerIDs[chipIndex];
-        *device = chipDeviceIDs[chipIndex];
+        *manufacturer = chipManufacturerIDs[selectedSIMMTypeUsesShiftedUnlock()][chipIndex];
+        *device = chipDeviceIDs[selectedSIMMTypeUsesShiftedUnlock()][chipIndex];
     }
     else
     {
@@ -1633,6 +1637,11 @@ VerificationOption Programmer::verifyMode() const
 ProgrammerRevision Programmer::programmerRevision() const
 {
     return static_cast<ProgrammerRevision>(detectedDeviceRevision);
+}
+
+bool Programmer::selectedSIMMTypeUsesShiftedUnlock() const
+{
+    return SIMMChip() == SIMM_TSOP_x8;
 }
 
 void Programmer::doVerifyAfterWriteCompare()
