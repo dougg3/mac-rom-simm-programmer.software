@@ -52,6 +52,7 @@ SIMMDesc simmTable[] ={
     {3, "1MB (4x 2Mb PLCC)",    1024, SIMM_PLCC_x8 },
     {4, "2MB (4x 4Mb PLCC)",    2048, SIMM_PLCC_x8 },
     {8, "2MB (2x 8Mb TSOP)",    2048, SIMM_TSOP_x16},
+    {9, "4MB (4x 8Mb TSOP)",    4096, SIMM_TSOP_x8 },
     {5, "4MB (2x 16Mb TSOP)",   4096, SIMM_TSOP_x16},
     {6, "8MB (4x 16Mb TSOP)",   8192, SIMM_TSOP_x8 },
     {7, "8MB (2x 32Mb TSOP)",   8192, SIMM_TSOP_x16},
