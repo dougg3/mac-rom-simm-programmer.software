@@ -29,6 +29,7 @@ public:
 
 private:
     void loadChips(QIODevice &file);
+    static uint32_t decodeSectorSize(QString sizeString);
 
     ChipInfo dummyChipInfo;
     QList<ChipInfo> allChips;

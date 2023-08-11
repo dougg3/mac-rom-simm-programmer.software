@@ -186,10 +186,79 @@ void ChipID::loadChips(QIODevice &file)
         info.product = components[1];
         info.width = components[2].toUInt();
         info.capacity = components[3].toUInt() * 1024;
-        // TODO: parse sector info for partial erase functionality
+        QStringList sectorGroups = components[4].split(",");
+        foreach (QString const &sectorGroup, sectorGroups)
+        {
+            QStringList sectorGroupComponents = sectorGroup.split("*");
+            QPair<uint16_t, uint32_t> numAndSize;
+            if (sectorGroupComponents.count() == 1)
+            {
+                numAndSize.first = 1;
+                numAndSize.second = decodeSectorSize(sectorGroup);
+            }
+            else if (sectorGroupComponents.count() == 2)
+            {
+                numAndSize.first = sectorGroupComponents[0].toUInt();
+                numAndSize.second = decodeSectorSize(sectorGroupComponents[1]);
+            }
+            else
+            {
+                continue;
+            }
+
+            if (numAndSize.first != 0 && numAndSize.second != 0)
+            {
+                info.sectors << numAndSize;
+            }
+        }
+
+        // Sanity-check the sector list against the total capacity
+        uint32_t sectorTotal = 0;
+        QPair<uint16_t, uint32_t> numAndSize;
+        foreach (numAndSize, info.sectors)
+        {
+            sectorTotal += numAndSize.first * numAndSize.second;
+        }
+
+        // Account for the fact that in 16-bit mode the sector sizes are in words
+        if (info.width == 16)
+        {
+            sectorTotal *= 2;
+        }
+
+        if (sectorTotal != info.capacity)
+        {
+            qWarning("Chip \"%s %s\" has mismatched sector sizes", qPrintable(info.manufacturer), qPrintable(info.product));
+            continue;
+        }
+
         info.manufacturerID = components[5].toUInt(NULL, 16);
         info.productID = components[6].toUInt(NULL, 16);
         info.unlockShifted = components[7].toUpper() == "YES";
         allChips.append(info);
     }
+}
+
+uint32_t ChipID::decodeSectorSize(QString sizeString)
+{
+    uint32_t multiplier = 1;
+    if (sizeString.endsWith("K"))
+    {
+        multiplier = 1024;
+        sizeString.chop(1);
+    }
+    else if (sizeString.endsWith("M"))
+    {
+        multiplier = 1048576;
+        sizeString.chop(1);
+    }
+
+    bool ok;
+    uint32_t number = sizeString.toUInt(&ok);
+    if (ok)
+    {
+        return number * multiplier;
+    }
+
+    return 0;
 }
