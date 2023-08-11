@@ -28,6 +28,7 @@
 #include <QSettings>
 #include <QBuffer>
 #include <QThread>
+#include <algorithm>
 
 static Programmer *p;
 
@@ -63,7 +64,8 @@ MainWindow::MainWindow(QWidget *parent) :
     readFile(NULL),
     writeBuffer(NULL),
     readBuffer(NULL),
-    activeMessageBox(NULL)
+    activeMessageBox(NULL),
+    chipID(":/chipid/chipid.txt")
 {
     initializing = true;
     // Make default QSettings use these settings
@@ -892,34 +894,173 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
         ui->pages->setCurrentWidget(ui->controlPage);
         QString identifyString = "The chips identified themselves as:";
 
-        // Check the number of chips
-        if (p->SIMMChip() == SIMM_TSOP_x16)
+        // Get the straight and shifted unlock results from the identification command
+        QList<uint8_t> manufacturersStraight;
+        QList<uint8_t> devicesStraight;
+        QList<uint8_t> manufacturersShifted;
+        QList<uint8_t> devicesShifted;
+        for (int i = 0; i < 4; i++)
         {
-            for (int x = 0; x < 2; x++)
+            uint8_t m, d;
+            p->getChipIdentity(i, &m, &d, false);
+            manufacturersStraight << m;
+            devicesStraight << d;
+            p->getChipIdentity(i, &m, &d, true);
+            manufacturersShifted << m;
+            devicesShifted << d;
+        }
+
+        // Pass it all to ChipID to see what it finds
+        QList<ChipID::ChipInfo> chipInfo;
+        if (chipID.findChips(manufacturersStraight, devicesStraight, manufacturersShifted, devicesShifted, chipInfo) && !chipInfo.isEmpty())
+        {
+            // It found something! Now, try to make some sense of the results.
+            QSet<uint32_t> capacities;
+            int chipNumber = 1;
+
+            // If we get here, update the message to say how many chips we found
+            identifyString = QString("The %1 chips identified themselves as:").arg(chipInfo.count());
+
+            foreach (ChipID::ChipInfo const &ci, chipInfo)
             {
                 QString thisString;
-                uint8_t manufacturer0 = 0, manufacturer1 = 0;
-                uint8_t device0 = 0, device1 = 0;
-                p->getChipIdentity(x*2, &manufacturer0, &device0);
-                p->getChipIdentity(x*2+1, &manufacturer1, &device1);
-                thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
-                        .arg(QString::number((static_cast<uint16_t>(manufacturer1) << 8) | manufacturer0, 16).toUpper(), 4, QChar('0'))
-                        .arg(QString::number((static_cast<uint16_t>(device1) << 8) | device0, 16).toUpper(), 4, QChar('0'));
+                         thisString = QString("\nIC%1: %2 %3 [0x%4, 0x%5]").arg(chipNumber++)
+                        .arg(ci.manufacturer)
+                        .arg(ci.product)
+                        .arg(QString::number(ci.manufacturerID, 16).toUpper(), 2, QChar('0'))
+                        .arg(QString::number(ci.productID, 16).toUpper(), 2, QChar('0'));
                 identifyString.append(thisString);
+
+                capacities << ci.capacity;
+            }
+
+            uint32_t capacityToDisplay = 0;
+
+            // Check for problems in the returned data. Like maybe only one of the chips has a shorted data pin.
+            if (capacities.count() > 1 || capacities.contains(0))
+            {
+                if (capacities.contains(0))
+                {
+                    identifyString.append("\n\nThere seems to be something wrong with one or more of the chips on this SIMM.");
+                }
+                else
+                {
+                    identifyString.append("\n\nThere seems to be a mismatch of chip types on this SIMM.");
+                }
+                capacities.remove(0);
+                QList<uint32_t> allValues = capacities.values();
+                // Sort the list so that the lowest capacity is the one we display. If there is a mismatch,
+                // the mismatch message will have been printed above
+                std::sort(allValues.begin(), allValues.end());
+                if (allValues.count() > 0)
+                {
+                    capacityToDisplay = allValues[0] * chipInfo.count();
+                }
+            }
+            else
+            {
+                // If we get here, the chips are all the same capacity and all recognized.
+                capacityToDisplay = capacities.values().at(0) * chipInfo.count();
+            }
+
+            if (capacityToDisplay != 0)
+            {
+                identifyString.append(QString("\n\nTotal Capacity = %1").arg(displayableFileSize(capacityToDisplay)));
+            }
+
+            // Find the first chip matching the capacity we determined earlier
+            foreach (ChipID::ChipInfo const &ci, chipInfo)
+            {
+                if (ci.capacity > 0 && ci.capacity == capacityToDisplay / chipInfo.count())
+                {
+                    // We found one. Let's figure out what item we should choose in the list.
+                    const uint32_t chipCapacityBits = ci.capacity * 8;
+                    const bool tsop = ci.width == 16 || ci.unlockShifted;
+                    const int chipCount = chipInfo.count();
+                    QString displayChipCapacity;
+                    if (chipCapacityBits >= 1048576)
+                    {
+                        displayChipCapacity = QString("%1Mb").arg(chipCapacityBits / 1048576);
+                    }
+                    else if (chipCapacityBits >= 1024)
+                    {
+                        displayChipCapacity = QString("%1Kb").arg(chipCapacityBits / 1024);
+                    }
+                    else
+                    {
+                        displayChipCapacity = "Unknown";
+                    }
+                    QString chipConfigDetail;
+                    chipConfigDetail = QString("(%1x %2 %3)").arg(chipCount).arg(displayChipCapacity).arg(tsop ? "TSOP" : "PLCC");
+                    identifyString.append(" ");
+                    identifyString.append(chipConfigDetail);
+
+                    // Special cases: select the 8 MB option for SIMMs larger than 8 MB. The programmer only has enough address
+                    // lines to access 8 MB of data at a time, but there are SIMMs out there that are larger.
+                    if (chipCount == 4 && chipCapacityBits > 16*1048576)
+                    {
+                        chipConfigDetail = "(4x 16Mb TSOP)";
+                    }
+                    else if (chipCount == 2 && chipCapacityBits > 32*1048576)
+                    {
+                        chipConfigDetail = "(2x 32Mb TSOP)";
+                    }
+
+                    // Find a matching item in the dropdown
+                    bool foundMatch = false;
+                    for (size_t i = 0; i < sizeof(simmTable)/sizeof(simmTable[0]); i++)
+                    {
+                        QString displayName(simmTable[i].text);
+                        if (displayName.contains(chipConfigDetail))
+                        {
+                            foundMatch = true;
+                            ui->simmCapacityBox->setCurrentIndex(i);
+                            break;
+                        }
+                    }
+
+                    // If we don't find a match, add a note to the bottom of the chip ID
+                    if (!foundMatch)
+                    {
+                        identifyString.append("\n\nThis chip combination is not currently supported, but you can try selecting a similar combination with a different capacity.");
+                    }
+
+                    break;
+                }
             }
         }
         else
         {
-            for (int x = 0; x < 4; x++)
+            // If we failed to identify the chips, fall back to the old method where we just dump the raw data
+            // based on the current selected chip type
+            if (p->SIMMChip() == SIMM_TSOP_x16)
             {
-                QString thisString;
-                uint8_t manufacturer = 0;
-                uint8_t device = 0;
-                p->getChipIdentity(x, &manufacturer, &device);
-                thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
-                        .arg(QString::number(manufacturer, 16).toUpper(), 2, QChar('0'))
-                        .arg(QString::number(device, 16).toUpper(), 2, QChar('0'));
-                identifyString.append(thisString);
+                for (int x = 0; x < 2; x++)
+                {
+                    QString thisString;
+                    uint8_t manufacturer0 = 0, manufacturer1 = 0;
+                    uint8_t device0 = 0, device1 = 0;
+                    p->getChipIdentity(x*2, &manufacturer0, &device0, p->selectedSIMMTypeUsesShiftedUnlock());
+                    p->getChipIdentity(x*2+1, &manufacturer1, &device1, p->selectedSIMMTypeUsesShiftedUnlock());
+                    thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
+                            .arg(QString::number((static_cast<uint16_t>(manufacturer1) << 8) | manufacturer0, 16).toUpper(), 4, QChar('0'))
+                            .arg(QString::number((static_cast<uint16_t>(device1) << 8) | device0, 16).toUpper(), 4, QChar('0'));
+                    identifyString.append(thisString);
+                }
+            }
+            else
+            {
+                for (int x = 0; x < 4; x++)
+                {
+                    QString thisString;
+                    uint8_t manufacturer = 0;
+                    uint8_t device = 0;
+                    p->getChipIdentity(x, &manufacturer, &device, p->selectedSIMMTypeUsesShiftedUnlock());
+                    thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
+                            .arg(QString::number(manufacturer, 16).toUpper(), 2, QChar('0'))
+                            .arg(QString::number(device, 16).toUpper(), 2, QChar('0'));
+                    identifyString.append(thisString);
+                }
             }
         }
 

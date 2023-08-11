@@ -137,7 +137,7 @@ public:
     void runElectricalTest();
     QString electricalTestPinName(uint8_t index);
     void identifySIMMChips();
-    void getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device);
+    void getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device, bool shiftedUnlock);
     void flashFirmware(QString filename);
     void startCheckingPorts();
     void setSIMMType(uint32_t bytes, uint32_t chip_type);

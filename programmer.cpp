@@ -1428,12 +1428,12 @@ void Programmer::identifySIMMChips()
     startProgrammerCommand(SetSIMMLayout_AddressStraight, IdentificationWaitingSetSizeReply);
 }
 
-void Programmer::getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device)
+void Programmer::getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device, bool shiftedUnlock)
 {
     if ((chipIndex >= 0) && (chipIndex < 4))
     {
-        *manufacturer = chipManufacturerIDs[selectedSIMMTypeUsesShiftedUnlock()][chipIndex];
-        *device = chipDeviceIDs[selectedSIMMTypeUsesShiftedUnlock()][chipIndex];
+        *manufacturer = chipManufacturerIDs[shiftedUnlock][chipIndex];
+        *device = chipDeviceIDs[shiftedUnlock][chipIndex];
     }
     else
     {

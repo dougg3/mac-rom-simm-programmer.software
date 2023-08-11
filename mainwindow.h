@@ -24,6 +24,7 @@
 #include <QFile>
 #include <QMessageBox>
 #include "programmer.h"
+#include "chipid.h"
 
 namespace Ui {
 class MainWindow;
@@ -129,6 +130,7 @@ private:
     QByteArray compressedImageFileHash;
     QByteArray compressedImage;
     QMessageBox *activeMessageBox;
+    ChipID chipID;
 
     void resetAndShowStatusPage();
     void handleVerifyFailureReply();
