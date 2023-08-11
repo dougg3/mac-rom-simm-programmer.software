@@ -29,6 +29,7 @@
 #include <QBuffer>
 #include <QThread>
 #include <algorithm>
+#include <QLocale>
 
 static Programmer *p;
 
@@ -1876,21 +1877,26 @@ void MainWindow::updateCreateROMControlStatus()
             QString prettySize = displayableFileSize(size);
             if (shouldCompress || alreadyCompressed)
             {
-                prettySize += " (compressed)";
+                prettySize += " (FC8-compressed)";
             }
 
-            if (size > simmTable[ui->simmCapacityBox->currentIndex()].size * 1024)
+            const qint64 simmSize = simmTable[ui->simmCapacityBox->currentIndex()].size * 1024;
+            if (size > simmSize)
             {
                 // If the image is too big, it's an error
                 error = true;
                 ui->writeCombinedFileToSIMMButton->setEnabled(false);
                 ui->saveCombinedFileButton->setEnabled(false);
-                ui->createROMErrorText->setText("Total ROM Size is too big: " + prettySize);
+
+                // Mark just how much too big it is.
+                prettySize += ". Disk image is too large by " + QLocale(QLocale::English).toString(size - simmSize) + " bytes.";
             }
             else
             {
-                ui->createROMErrorText->setText("Total ROM Size: " + prettySize);
+                prettySize += ". " + QLocale(QLocale::English).toString(simmSize - size) + " bytes of space remain.";
             }
+
+            ui->createROMErrorText->setText("Total ROM Size: " + prettySize);
         }
     }
     else
