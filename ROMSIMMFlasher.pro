@@ -57,3 +57,9 @@ win32:QMAKE_TARGET_COMPANY = "Doug Brown"
 win32:QMAKE_TARGET_DESCRIPTION = "Mac ROM SIMM Programmer"
 win32:QMAKE_TARGET_COPYRIGHT = "Copyright (C) Doug Brown"
 win32:QMAKE_TARGET_PRODUCT = "Mac ROM SIMM Programmer"
+
+DISTFILES += \
+    chipid.txt
+
+RESOURCES += \
+    chipid.qrc
