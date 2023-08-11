@@ -2371,7 +2371,6 @@ void MainWindow::setUseExtendedUI(bool extended)
         ui->tabWidget->hide();
         ui->createVerifyBox->hide();
         ui->createHowMuchToWriteBox->hide();
-        ui->createButtonsLayout->insertWidget(0, ui->createROMErrorText);
     }
     else
     {
@@ -2385,7 +2384,6 @@ void MainWindow::setUseExtendedUI(bool extended)
         ui->tabWidget->show();
         ui->createVerifyBox->show();
         ui->createHowMuchToWriteBox->show();
-        ui->createROMGroupLayout->insertWidget(2, ui->createROMErrorText);
     }
 
     if (!initializing)
