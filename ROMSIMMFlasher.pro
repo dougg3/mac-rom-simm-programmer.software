@@ -13,6 +13,7 @@ QMAKE_TARGET_BUNDLE_PREFIX = com.downtowndougbrown
 SOURCES += main.cpp\
     3rdparty/fc8-compression.c \
     chipid.cpp \
+    createblankdiskdialog.cpp \
     droppablegroupbox.cpp \
     fc8compressor.cpp \
     mainwindow.cpp \
@@ -22,13 +23,15 @@ SOURCES += main.cpp\
 HEADERS  += mainwindow.h \
     3rdparty/fc8-compression/fc8.h \
     chipid.h \
+    createblankdiskdialog.h \
     droppablegroupbox.h \
     fc8compressor.h \
     programmer.h \
     aboutbox.h
 
 FORMS    += mainwindow.ui \
-    aboutbox.ui
+    aboutbox.ui \
+    createblankdiskdialog.ui
 
 linux*:CONFIG += qesp_linux_udev
 include(3rdparty/qextserialport/src/qextserialport.pri)
