@@ -7,6 +7,12 @@ CreateBlankDiskDialog::CreateBlankDiskDialog(QWidget *parent) :
     ui(new Ui::CreateBlankDiskDialog)
 {
     ui->setupUi(this);
+
+    // The window needs to be bigger on Mac and Linux due to larger fonts
+#if defined(Q_OS_MACX) || defined(Q_OS_LINUX)
+    resize(width() + 173, height() + 86);
+#endif
+
     ui->buttonBox->addButton("Save...", QDialogButtonBox::AcceptRole);
 
     bool addedDisabledHeadings = false;
