@@ -22,6 +22,7 @@
 #include "programmer.h"
 #include "aboutbox.h"
 #include "fc8compressor.h"
+#include "createblankdiskdialog.h"
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDebug>
@@ -2390,5 +2391,38 @@ void MainWindow::setUseExtendedUI(bool extended)
     {
         QSettings settings;
         settings.setValue(extendedViewKey, extended);
+    }
+}
+
+void MainWindow::on_actionCreate_blank_disk_image_triggered()
+{
+    CreateBlankDiskDialog dialog;
+    int result = dialog.exec();
+    if (result == QDialog::Accepted)
+    {
+        QString filename = QFileDialog::getSaveFileName(this, "Save blank disk image as:", QString(), "Disk images (*.dsk)");
+        if (!filename.isEmpty())
+        {
+            QFile outFile(filename);
+            if (outFile.open(QFile::WriteOnly))
+            {
+                QByteArray be(dialog.selectedDiskSize(), static_cast<char>(0));
+                bool success = outFile.write(be) == be.length();
+                outFile.close();
+
+                if (success)
+                {
+                    QMessageBox::information(this, "Disk image created", "Successfully created a blank disk image.");
+                }
+                else
+                {
+                    QMessageBox::warning(this, "File write error", "Unable to write to the blank disk image file.");
+                }
+            }
+            else
+            {
+                QMessageBox::warning(this, "File save error", "Unable to open the blank disk image file for writing.");
+            }
+        }
     }
 }

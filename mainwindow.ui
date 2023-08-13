@@ -822,6 +822,7 @@
     <property name="title">
      <string>File</string>
     </property>
+    <addaction name="actionCreate_blank_disk_image"/>
     <addaction name="actionQuit"/>
    </widget>
    <widget class="QMenu" name="menuAdvanced">
@@ -868,6 +869,11 @@
    </property>
    <property name="text">
     <string>Extended View</string>
+   </property>
+  </action>
+  <action name="actionCreate_blank_disk_image">
+   <property name="text">
+    <string>Create blank disk image...</string>
    </property>
   </action>
  </widget>

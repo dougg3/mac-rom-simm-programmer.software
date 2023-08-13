@@ -119,6 +119,8 @@ private slots:
 
     void on_actionExtended_UI_triggered(bool checked);
 
+    void on_actionCreate_blank_disk_image_triggered();
+
 private:
     Ui::MainWindow *ui;
     bool initializing;
