@@ -80,6 +80,11 @@ MainWindow::MainWindow(QWidget *parent) :
     p = new Programmer();
     ui->setupUi(this);
 
+    // On Mac and Linux, make it a little wider due to larger font
+#if defined(Q_OS_MACX) || defined(Q_OS_LINUX)
+    resize(width() + 200, height());
+#endif
+
     if (settings.value(extendedViewKey, false).toBool())
     {
         setUseExtendedUI(true);
