@@ -16,9 +16,11 @@ SOURCES += main.cpp\
     createblankdiskdialog.cpp \
     droppablegroupbox.cpp \
     fc8compressor.cpp \
+    labelwithlinks.cpp \
     mainwindow.cpp \
     programmer.cpp \
-    aboutbox.cpp
+    aboutbox.cpp \
+    textbrowserwithlinks.cpp
 
 HEADERS  += mainwindow.h \
     3rdparty/fc8-compression/fc8.h \
@@ -26,8 +28,10 @@ HEADERS  += mainwindow.h \
     createblankdiskdialog.h \
     droppablegroupbox.h \
     fc8compressor.h \
+    labelwithlinks.h \
     programmer.h \
-    aboutbox.h
+    aboutbox.h \
+    textbrowserwithlinks.h
 
 FORMS    += mainwindow.ui \
     aboutbox.ui \
