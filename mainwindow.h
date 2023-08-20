@@ -149,6 +149,7 @@ private:
     void compressImageInBackground(QByteArray uncompressedImage, bool blockUntilCompletion);
     QByteArray uncompressedDiskImage();
     QByteArray diskImageToWrite();
+    QByteArray unpatchedBaseROM();
     QByteArray createROM();
     QString displayableFileSize(qint64 size);
 

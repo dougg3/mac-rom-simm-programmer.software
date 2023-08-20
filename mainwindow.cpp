@@ -1980,21 +1980,8 @@ bool MainWindow::checkBaseROMValidity(QString &errorText)
 
 bool MainWindow::checkBaseROMCompressionSupport()
 {
-    // Determine if the selected base ROM supports compression by opening it
-    // and checking for a matching string
-
-    const QString baseROMFileName = ui->chosenBaseROMFile->text();
-    QFile f(baseROMFileName);
-    if (!f.open(QFile::ReadOnly))
-    {
-        return false;
-    }
-
-    QByteArray romData = f.readAll();
-    f.close();
-
     // This string shows up in custom ROMs that support compression
-    return romData.contains(" block-compressed disk image");
+    return unpatchedBaseROM().contains(" block-compressed disk image");
 }
 
 bool MainWindow::checkDiskImageValidity(QString &errorText, bool &alreadyCompressed)
@@ -2157,18 +2144,29 @@ QByteArray MainWindow::diskImageToWrite()
     }
 }
 
-QByteArray MainWindow::createROM()
+QByteArray MainWindow::unpatchedBaseROM()
 {
     QByteArray finalImage;
-    const QString baseROMFileName = ui->chosenBaseROMFile->text();
-
-    QFile f(baseROMFileName);
+    QFile f(ui->chosenBaseROMFile->text());
     if (!f.open(QFile::ReadOnly))
     {
         return QByteArray();
     }
     finalImage = f.readAll();
     f.close();
+    return finalImage;
+}
+
+QByteArray MainWindow::createROM()
+{
+    QByteArray finalImage;
+    QByteArray baseROM = unpatchedBaseROM();
+    if (baseROM.isEmpty())
+    {
+        return QByteArray();
+    }
+
+    finalImage = baseROM;
 
     QByteArray diskImage = diskImageToWrite();
     if (diskImage.isEmpty())
