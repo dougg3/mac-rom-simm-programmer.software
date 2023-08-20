@@ -160,6 +160,7 @@ private:
     QByteArray uncompressedDiskImage();
     QByteArray diskImageToWrite();
     QByteArray unpatchedBaseROM();
+    QByteArray patchedBaseROM();
     QByteArray createROM();
     QString displayableFileSize(qint64 size);
 

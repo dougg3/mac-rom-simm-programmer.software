@@ -2189,10 +2189,41 @@ QByteArray MainWindow::unpatchedBaseROM()
     return finalImage;
 }
 
+QByteArray MainWindow::patchedBaseROM()
+{
+    QByteArray rom = unpatchedBaseROM();
+    uint32_t imageSize = uncompressedDiskImage().length();
+
+    // If we find a base ROM that we know how to modify for the correct disk image size,
+    // perform the modification here.
+    switch (identifyBaseROM())
+    {
+    case BaseROMbbraun8MB:
+        rom[0x52500] = (imageSize >> 24) & 0xFF;
+        rom[0x52501] = (imageSize >> 16) & 0xFF;
+        rom[0x52502] = (imageSize >> 8) & 0xFF;
+        rom[0x52503] = (imageSize >> 0) & 0xFF;
+        break;
+    case BaseROMGarrettsWorkshop:
+        rom[0x51DAC] = (imageSize >> 24) & 0xFF;
+        rom[0x51DAD] = (imageSize >> 16) & 0xFF;
+        rom[0x51DAE] = (imageSize >> 8) & 0xFF;
+        rom[0x51DAF] = (imageSize >> 0) & 0xFF;
+        break;
+    case BaseROMUnknown:
+    case BaseROMbbraun2MB:
+    case BaseROMBMOW:
+    default:
+        break;
+    }
+
+    return rom;
+}
+
 QByteArray MainWindow::createROM()
 {
     QByteArray finalImage;
-    QByteArray baseROM = unpatchedBaseROM();
+    QByteArray baseROM = patchedBaseROM();
     if (baseROM.isEmpty())
     {
         return QByteArray();
