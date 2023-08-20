@@ -1866,6 +1866,13 @@ void MainWindow::updateCreateROMControlStatus()
             ui->writeCombinedFileToSIMMButton->setEnabled(false);
             ui->saveCombinedFileButton->setEnabled(false);
         }
+        else if (identifyBaseROM() == BaseROMbbraun2MB && uncompressedImage.length() > 1572864)
+        {
+            ui->createROMErrorText->setText("This base ROM only supports disk images " + QLocale(QLocale::English).toString(1572864) + " bytes or less in size.");
+            error = true;
+            ui->writeCombinedFileToSIMMButton->setEnabled(false);
+            ui->saveCombinedFileButton->setEnabled(false);
+        }
         else
         {
             QFileInfo baseRom(ui->chosenBaseROMFile->text());
