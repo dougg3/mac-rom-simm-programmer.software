@@ -1078,35 +1078,70 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
         }
         else
         {
-            // If we failed to identify the chips, fall back to the old method where we just dump the raw data
-            // based on the current selected chip type
-            if (p->SIMMChip() == SIMM_TSOP_x16)
+            // If we failed to identify the chips, then there might be a problem with the programmable ROM SIMM,
+            // or maybe it's not a programmable SIMM, in which case we have just read back the first 12 bytes
+            // of the SIMM (first 4 bytes = manufacturers straight, next 4 bytes = devices straight/manufacturers shifted,
+            // next 4 bytes = devices shifted). See if it has a standard Mac ROM checksum. It might be a stock ROM SIMM.
+            QString macModel;
+
+            // Quick sanity check: the shifted identification addresses are offset by 1 byte.
+            // So if the straight device response is the same as the shifted manufacturer response,
+            // it likely means we aren't unlocking any flash chips. It may very well be a mask ROM.
+            if (devicesStraight == manufacturersShifted)
             {
-                for (int x = 0; x < 2; x++)
+                uint32_t possibleRomChecksum = manufacturersStraight[0] |
+                        (static_cast<uint32_t>(manufacturersStraight[1]) << 8) |
+                        (static_cast<uint32_t>(manufacturersStraight[2]) << 16) |
+                        (static_cast<uint32_t>(manufacturersStraight[3]) << 24);
+
+                // See if we find a matching standard Mac ROM checksum in our internal database
+                for (size_t i = 0; i < sizeof(romChecksumsAndModels) / sizeof(romChecksumsAndModels[0]); i++)
                 {
-                    QString thisString;
-                    uint8_t manufacturer0 = 0, manufacturer1 = 0;
-                    uint8_t device0 = 0, device1 = 0;
-                    p->getChipIdentity(x*2, &manufacturer0, &device0, p->selectedSIMMTypeUsesShiftedUnlock());
-                    p->getChipIdentity(x*2+1, &manufacturer1, &device1, p->selectedSIMMTypeUsesShiftedUnlock());
-                    thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
-                            .arg(QString::number((static_cast<uint16_t>(manufacturer1) << 8) | manufacturer0, 16).toUpper(), 4, QChar('0'))
-                            .arg(QString::number((static_cast<uint16_t>(device1) << 8) | device0, 16).toUpper(), 4, QChar('0'));
-                    identifyString.append(thisString);
+                    if (romChecksumsAndModels[i].checksum == possibleRomChecksum)
+                    {
+                        macModel = romChecksumsAndModels[i].model;
+                        break;
+                    }
                 }
+            }
+
+            if (!macModel.isEmpty())
+            {
+                identifyString = QString("This appears to be a standard Macintosh %1 ROM SIMM according to its checksum.").arg(macModel);
+                identifyString += "\n\nIt is likely composed of mask ROMs and not programmable. If this is a programmable SIMM, there might be a problem with it.";
             }
             else
             {
-                for (int x = 0; x < 4; x++)
+                // If we STILL failed to identify anything, fall back to the old method where we just dump the raw data
+                // based on the current selected chip type
+                if (p->SIMMChip() == SIMM_TSOP_x16)
                 {
-                    QString thisString;
-                    uint8_t manufacturer = 0;
-                    uint8_t device = 0;
-                    p->getChipIdentity(x, &manufacturer, &device, p->selectedSIMMTypeUsesShiftedUnlock());
-                    thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
-                            .arg(QString::number(manufacturer, 16).toUpper(), 2, QChar('0'))
-                            .arg(QString::number(device, 16).toUpper(), 2, QChar('0'));
-                    identifyString.append(thisString);
+                    for (int x = 0; x < 2; x++)
+                    {
+                        QString thisString;
+                        uint8_t manufacturer0 = 0, manufacturer1 = 0;
+                        uint8_t device0 = 0, device1 = 0;
+                        p->getChipIdentity(x*2, &manufacturer0, &device0, p->selectedSIMMTypeUsesShiftedUnlock());
+                        p->getChipIdentity(x*2+1, &manufacturer1, &device1, p->selectedSIMMTypeUsesShiftedUnlock());
+                        thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
+                                .arg(QString::number((static_cast<uint16_t>(manufacturer1) << 8) | manufacturer0, 16).toUpper(), 4, QChar('0'))
+                                .arg(QString::number((static_cast<uint16_t>(device1) << 8) | device0, 16).toUpper(), 4, QChar('0'));
+                        identifyString.append(thisString);
+                    }
+                }
+                else
+                {
+                    for (int x = 0; x < 4; x++)
+                    {
+                        QString thisString;
+                        uint8_t manufacturer = 0;
+                        uint8_t device = 0;
+                        p->getChipIdentity(x, &manufacturer, &device, p->selectedSIMMTypeUsesShiftedUnlock());
+                        thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
+                                .arg(QString::number(manufacturer, 16).toUpper(), 2, QChar('0'))
+                                .arg(QString::number(device, 16).toUpper(), 2, QChar('0'));
+                        identifyString.append(thisString);
+                    }
                 }
             }
         }
