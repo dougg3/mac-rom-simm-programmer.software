@@ -60,6 +60,45 @@ SIMMDesc simmTable[] ={
     {7, "8MB (2x 32Mb TSOP)",   8192, SIMM_TSOP_x16},
 };
 
+static const struct
+{
+    uint32_t checksum;
+    const char *model;
+} romChecksumsAndModels[] = {
+    {0x28BA61CEUL, "128k or 512k"},
+    {0x28BA4E50UL, "128k or 512k"},
+    {0x4D1EEEE1UL, "Plus"},
+    {0x4D1EEAE1UL, "Plus"},
+    {0x4D1F8172UL, "Plus"},
+    {0xB2E362A8UL, "SE"},
+    {0xB306E171UL, "SE FDHD"},
+    {0x9779D2C4UL, "II"},
+    {0x97851DB6UL, "II"},
+    {0x97221136UL, "IIx, IIcx, or SE/30"},
+    {0x368CADFEUL, "IIci"},
+    {0x36B7FB6CUL, "IIsi"},
+    {0x4147DD77UL, "IIfx"},
+    {0x4957EB49UL, "IIvx or IIvi"},
+    {0x49579803UL, "IIvx or IIvi"},
+    {0xA49F9914UL, "Classic"},
+    {0x3193670EUL, "Classic II"},
+    {0xECD99DC0UL, "Color Classic"},
+    {0xEDE66CBDUL, "Color Classic II, LC 550, or TV"},
+    {0xEAF1678DUL, "Color Classic II, LC 550, or TV"},
+    {0x350EACF0UL, "LC"},
+    {0x35C28F5FUL, "LC II"},
+    {0xEC904829UL, "LC III"},
+    {0xECBBC41CUL, "LC III"},
+    {0x064DC91DUL, "LC 580"},
+    {0xF1A6F343UL, "Quadra/Centris 610, 650, or 800"},
+    {0x420DBFF3UL, "Quadra 700 or 900"},
+    {0x3DC27823UL, "Quadra 950"},
+    {0xFF7439EEUL, "Quadra 605, LC 475, or LC 575"},
+    {0x06684214UL, "Quadra 630"},
+    {0x5BF10FD1UL, "Quadra 660av or 840av"},
+    {0x87D3C814UL, "Quadra 660av or 840av"},
+};
+
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow),
