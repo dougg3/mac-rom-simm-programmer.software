@@ -134,6 +134,15 @@ private:
     QMessageBox *activeMessageBox;
     ChipID chipID;
 
+    enum KnownBaseROM
+    {
+        BaseROMUnknown,
+        BaseROMbbraun2MB,
+        BaseROMbbraun8MB,
+        BaseROMBMOW,
+        BaseROMGarrettsWorkshop,
+    };
+
     void resetAndShowStatusPage();
     void handleVerifyFailureReply();
 
@@ -144,6 +153,7 @@ private:
 
     bool checkBaseROMValidity(QString &errorText);
     bool checkBaseROMCompressionSupport();
+    KnownBaseROM identifyBaseROM();
     bool checkDiskImageValidity(QString &errorText, bool &alreadyCompressed);
     bool isCompressedDiskImage(QByteArray const &image);
     void compressImageInBackground(QByteArray uncompressedImage, bool blockUntilCompletion);

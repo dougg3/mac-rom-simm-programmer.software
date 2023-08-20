@@ -1984,6 +1984,38 @@ bool MainWindow::checkBaseROMCompressionSupport()
     return unpatchedBaseROM().contains(" block-compressed disk image");
 }
 
+MainWindow::KnownBaseROM MainWindow::identifyBaseROM()
+{
+    QByteArray baseROM = unpatchedBaseROM();
+
+    if (baseROM.contains("Garrett's Workshop ROM Disk"))
+    {
+        return BaseROMGarrettsWorkshop;
+    }
+    else if (baseROM.contains(" block-compressed disk image"))
+    {
+        return BaseROMBMOW;
+    }
+    // Look for a known byte pattern in bbraun's ROM disk driver
+    else if (baseROM.at(0x51DC0) == static_cast<char>(0x4E) &&
+             baseROM.at(0x51DC1) == static_cast<char>(0xBA) &&
+             baseROM.at(0x51DC2) == static_cast<char>(0x04) &&
+             baseROM.at(0x51DC3) == static_cast<char>(0xDC))
+    {
+        return BaseROMbbraun8MB;
+    }
+    // The pattern is slightly different in the 2 MB version
+    else if (baseROM.at(0x51DC0) == static_cast<char>(0x4E) &&
+             baseROM.at(0x51DC1) == static_cast<char>(0xBA) &&
+             baseROM.at(0x51DC2) == static_cast<char>(0x03) &&
+             baseROM.at(0x51DC3) == static_cast<char>(0x02))
+    {
+        return BaseROMbbraun2MB;
+    }
+
+    return BaseROMUnknown;
+}
+
 bool MainWindow::checkDiskImageValidity(QString &errorText, bool &alreadyCompressed)
 {
     alreadyCompressed = false;
