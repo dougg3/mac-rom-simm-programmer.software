@@ -31,6 +31,7 @@
 #include <QThread>
 #include <algorithm>
 #include <QLocale>
+#include <QCryptographicHash>
 
 static Programmer *p;
 
@@ -2284,6 +2285,23 @@ QByteArray MainWindow::patchedBaseROM()
         rom[0x52501] = (imageSize >> 16) & 0xFF;
         rom[0x52502] = (imageSize >> 8) & 0xFF;
         rom[0x52503] = (imageSize >> 0) & 0xFF;
+
+        // bbraun's 8 MB 0.9.6 base image has a bug that can cause a bus error when booting with R+A
+        // if a write is attempted before the ROM disk has been copied to RAM. Work around this
+        // bug if the driver exactly matches the known broken driver. The fix is, when deciding if
+        // a write operation is allowed or not, to look at origdisk instead of drvsts.writeProt.
+        // writeProt can say the drive is writable even though it hasn't been copied to RAM yet.
+        // When origdisk is non-null, we're guaranteed it's in RAM, so it's a safer check.
+        if (QCryptographicHash::hash(rom.mid(0x51D40, 0x7BC), QCryptographicHash::Md5) ==
+            QByteArray("\x0E\x12\x43\x36\x03\x48\x5C\xDE\x2E\x4C\x04\xE3\x30\xF9\xD2\x0B", 16))
+        {
+            // Change opcode from tst.b to tst.l
+            rom[0x521F1] = 0xAA;
+            // Change tested data from drvsts.writeProt to origdisk
+            rom[0x521F3] = 0x22;
+            // Change bne to beq
+            rom[0x521F4] = 0x67;
+        }
         break;
     case BaseROMGarrettsWorkshop:
         rom[0x51DAC] = (imageSize >> 24) & 0xFF;
