@@ -25,6 +25,7 @@
 #include <QIODevice>
 #include <qextserialport.h>
 #include <qextserialenumerator.h>
+#include "chipid.h"
 #include <stdint.h>
 #include <QBuffer>
 
@@ -148,6 +149,7 @@ public:
     uint8_t verifyBadChipMask() const { return _verifyBadChipMask; }
     ProgrammerRevision programmerRevision() const;
     bool selectedSIMMTypeUsesShiftedUnlock() const;
+    ChipID &chipID() { return _chipID; }
 signals:
     void startStatusChanged(StartStatus status);
 
@@ -220,6 +222,8 @@ private:
     uint32_t writeOffset;
     uint32_t writeLength;
     uint8_t writeChipMask;
+
+    ChipID _chipID;
 
     void openPort();
     void closePort();

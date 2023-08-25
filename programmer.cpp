@@ -201,7 +201,8 @@ static ProgrammerBoardFoundState foundState = ProgrammerBoardNotFound;
 static QString programmerBoardPortName;
 
 Programmer::Programmer(QObject *parent) :
-    QObject(parent)
+    QObject(parent),
+    _chipID(":/chipid/chipid.txt")
 {
     detectedDeviceRevision = 0;
     _verifyMode = VerifyAfterWrite;

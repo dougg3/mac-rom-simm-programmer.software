@@ -107,8 +107,7 @@ MainWindow::MainWindow(QWidget *parent) :
     readFile(NULL),
     writeBuffer(NULL),
     readBuffer(NULL),
-    activeMessageBox(NULL),
-    chipID(":/chipid/chipid.txt")
+    activeMessageBox(NULL)
 {
     initializing = true;
     // Make default QSettings use these settings
@@ -960,7 +959,7 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
 
         // Pass it all to ChipID to see what it finds
         QList<ChipID::ChipInfo> chipInfo;
-        if (chipID.findChips(manufacturersStraight, devicesStraight, manufacturersShifted, devicesShifted, chipInfo) && !chipInfo.isEmpty())
+        if (p->chipID().findChips(manufacturersStraight, devicesStraight, manufacturersShifted, devicesShifted, chipInfo) && !chipInfo.isEmpty())
         {
             // It found something! Now, try to make some sense of the results.
             QSet<uint32_t> capacities;
