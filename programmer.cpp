@@ -1335,8 +1335,37 @@ void Programmer::handleChar(uint8_t c)
                 // fall back to empty erase sector info.
                 sectorGroups.clear();
 
-                // TODO: Do chip ID here
+                // We have to convert the ID info into a format that is usable by ChipID
+                QList<uint8_t> manufacturersStraight;
+                QList<uint8_t> devicesStraight;
+                QList<uint8_t> manufacturersShifted;
+                QList<uint8_t> devicesShifted;
+                for (int i = 0; i < 4; i++)
+                {
+                    manufacturersStraight << chipManufacturerIDs[0][i];
+                    devicesStraight << chipDeviceIDs[0][i];
+                    manufacturersShifted << chipManufacturerIDs[1][i];
+                    devicesShifted << chipDeviceIDs[1][i];
+                }
 
+                // Now ask ChipID to tell us what we have
+                QList<ChipID::ChipInfo> chipInfo;
+                if (_chipID.findChips(manufacturersStraight, devicesStraight,
+                                      manufacturersShifted, devicesShifted,
+                                      chipInfo))
+                {
+                    // Use the sector info of the first valid chip we find in the info returned
+                    foreach (ChipID::ChipInfo const &info, chipInfo)
+                    {
+                        if (info.capacity != 0)
+                        {
+                            sectorGroups = info.sectors;
+                            break;
+                        }
+                    }
+                }
+
+                // OK, we have the sector info saved. Now, let's do it!
                 if (identifyWriteIsEntireSIMM)
                 {
                     startProgrammerCommand(SetSectorLayout, WriteSIMMWaitingSetSectorLayoutReply);
