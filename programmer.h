@@ -207,6 +207,8 @@ private:
     int identificationReadCounter;
     uint8_t chipManufacturerIDs[2][4];
     uint8_t chipDeviceIDs[2][4];
+    bool identifyIsForWriteAttempt;
+    bool identifyWriteIsEntireSIMM;
     QList<QPair<uint16_t, uint32_t> > sectorGroups;
 
     uint16_t detectedDeviceRevision;

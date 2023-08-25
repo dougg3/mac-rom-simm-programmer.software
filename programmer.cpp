@@ -210,6 +210,8 @@ Programmer::Programmer(QObject *parent) :
     _chipID(":/chipid/chipid.txt")
 {
     detectedDeviceRevision = 0;
+    identifyIsForWriteAttempt = false;
+    identifyWriteIsEntireSIMM = false;
     _verifyMode = VerifyAfterWrite;
     _verifyBadChipMask = 0;
     verifyArray = new QByteArray();
@@ -288,8 +290,14 @@ void Programmer::writeToSIMM(QIODevice *device, uint8_t chipsMask)
         writeLenRemaining = writeDevice->size();
         writeOffset = 0;
 
-        // Start out by trying to send the current known sector layout.
-        startProgrammerCommand(SetSectorLayout, WriteSIMMWaitingSetSectorLayoutReply);
+        // Start out by identifying the chips so that we can send the correct
+        // erase sector layout. We have to save some flags to indicate that the
+        // identification is the start of a write. This isn't strictly necessary
+        // for full chip erases, but I do it for consistency.
+        identifyIsForWriteAttempt = true;
+        identifyWriteIsEntireSIMM = true;
+        identificationShiftCounter = 0;
+        startProgrammerCommand(SetSIMMLayout_AddressStraight, IdentificationWaitingSetSizeReply);
     }
 }
 
@@ -322,8 +330,13 @@ void Programmer::writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t l
         writeOffset = startOffset;
         writeLength = length;
 
-        // Start out by trying to send the current known sector layout.
-        startProgrammerCommand(SetSectorLayout, WritePortionWaitingSetSectorLayoutReply);
+        // Start out by identifying the chips so that we can send the correct
+        // erase sector layout. We have to save some flags to indicate that the
+        // identification is the start of a write.
+        identifyIsForWriteAttempt = true;
+        identifyWriteIsEntireSIMM = false;
+        identificationShiftCounter = 0;
+        startProgrammerCommand(SetSIMMLayout_AddressStraight, IdentificationWaitingSetSizeReply);
     }
 }
 
@@ -1214,13 +1227,30 @@ void Programmer::handleChar(uint8_t c)
             // doesn't support the large SIMM type so the user needs to know.
             if (SIMMChip() != SIMM_PLCC_x8)
             {
-                // Uh oh -- this is an old firmware that doesn't support a big
-                // SIMM. Let the caller know that the programmer board needs a
-                // firmware update.
-                qDebug() << "Programmer board needs firmware update.";
-                curState = WaitingForNextCommand;
-                closePort();
-                emit identificationStatusChanged(IdentificationNeedsFirmwareUpdate);
+                if (!identifyIsForWriteAttempt)
+                {
+                    // Uh oh -- this is an old firmware that doesn't support a big
+                    // SIMM. Let the caller know that the programmer board needs a
+                    // firmware update.
+                    qDebug() << "Programmer board needs firmware update.";
+                    curState = WaitingForNextCommand;
+                    closePort();
+                    emit identificationStatusChanged(IdentificationNeedsFirmwareUpdate);
+                }
+                else
+                {
+                    // Don't inhibit writes if we failed to identify. Just assume an empty/unknown
+                    // sector layout and continue on
+                    sectorGroups.clear();
+                    if (identifyWriteIsEntireSIMM)
+                    {
+                        startProgrammerCommand(SetSectorLayout, WriteSIMMWaitingSetSectorLayoutReply);
+                    }
+                    else
+                    {
+                        startProgrammerCommand(SetSectorLayout, WritePortionWaitingSetSectorLayoutReply);
+                    }
+                }
             }
             else
             {
@@ -1240,7 +1270,7 @@ void Programmer::handleChar(uint8_t c)
         if (c == CommandReplyOK)
         {
             // Good to go, now waiting for identification data
-            if (identificationShiftCounter == 0)
+            if (identificationShiftCounter == 0 && !identifyIsForWriteAttempt)
             {   // If this is the first identification attempt, emit the signal
                 emit identificationStatusChanged(IdentificationStarting);
             }
@@ -1251,7 +1281,14 @@ void Programmer::handleChar(uint8_t c)
         {
             // Error -- close the port, we're done!
             closePort();
-            emit identificationStatusChanged(IdentificationError);
+            if (!identifyIsForWriteAttempt)
+            {
+                emit identificationStatusChanged(IdentificationError);
+            }
+            else
+            {
+                emit writeStatusChanged(WriteError);
+            }
             curState = WaitingForNextCommand;
         }
         break;
@@ -1278,15 +1315,36 @@ void Programmer::handleChar(uint8_t c)
     case IdentificationAwaitingDoneReply:
         if (++identificationShiftCounter >= 2)
         {
-            curState = WaitingForNextCommand;
-            closePort();
-            if (c == ProgrammerIdentifyDone)
+            if (!identifyIsForWriteAttempt)
             {
-                emit identificationStatusChanged(IdentificationComplete);
+                curState = WaitingForNextCommand;
+                closePort();
+                if (c == ProgrammerIdentifyDone)
+                {
+                    emit identificationStatusChanged(IdentificationComplete);
+                }
+                else
+                {
+                    emit identificationStatusChanged(IdentificationError);
+                }
             }
             else
             {
-                emit identificationStatusChanged(IdentificationError);
+                // This was for a write attempt and we got the ID data. Now parse it
+                // to try to figure out the erase sector layout. If we can't find anything,
+                // fall back to empty erase sector info.
+                sectorGroups.clear();
+
+                // TODO: Do chip ID here
+
+                if (identifyWriteIsEntireSIMM)
+                {
+                    startProgrammerCommand(SetSectorLayout, WriteSIMMWaitingSetSectorLayoutReply);
+                }
+                else
+                {
+                    startProgrammerCommand(SetSectorLayout, WritePortionWaitingSetSectorLayoutReply);
+                }
             }
         }
         else
@@ -1474,6 +1532,7 @@ QString Programmer::electricalTestPinName(uint8_t index)
 void Programmer::identifySIMMChips()
 {
     // Start with straight addresses
+    identifyIsForWriteAttempt = false;
     identificationShiftCounter = 0;
     startProgrammerCommand(SetSIMMLayout_AddressStraight, IdentificationWaitingSetSizeReply);
 }
