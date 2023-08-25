@@ -27,6 +27,8 @@ typedef enum ProgrammerCommandState
 {
     WaitingForNextCommand = 0,
 
+    WriteSIMMWaitingSetSectorLayoutReply,
+    WriteSIMMWaitingSectorLayoutDataReply,
     WriteSIMMWaitingSetSizeReply,
     WriteSIMMWaitingSetVerifyModeReply,
     WriteSIMMWaitingSetChipMaskReply,
@@ -66,6 +68,8 @@ typedef enum ProgrammerCommandState
     BootloaderEraseProgramWaitingWriteMoreReply,
     BootloaderEraseProgramWaitingWriteReply,
 
+    WritePortionWaitingSetSectorLayoutReply,
+    WritePortionWaitingSectorLayoutDataReply,
     WritePortionWaitingSetSizeReply,
     WritePortionWaitingSetVerifyModeReply,
     WritePortionWaitingSetChipMaskReply,
@@ -102,7 +106,8 @@ typedef enum ProgrammerCommand
     ErasePortion,
     WriteChipsAt,
     ReadChipsAt,
-    SetChipsMask
+    SetChipsMask,
+    SetSectorLayout
 } ProgrammerCommand;
 
 typedef enum ProgrammerReply
@@ -283,17 +288,8 @@ void Programmer::writeToSIMM(QIODevice *device, uint8_t chipsMask)
         writeLenRemaining = writeDevice->size();
         writeOffset = 0;
 
-        // Based on the SIMM type, tell the programmer board.
-        uint8_t setLayoutCommand;
-        if (SIMMChip() == SIMM_TSOP_x8)
-        {
-            setLayoutCommand = SetSIMMLayout_AddressShifted;
-        }
-        else
-        {
-            setLayoutCommand = SetSIMMLayout_AddressStraight;
-        }
-        startProgrammerCommand(setLayoutCommand, WriteSIMMWaitingSetSizeReply);
+        // Start out by trying to send the current known sector layout.
+        startProgrammerCommand(SetSectorLayout, WriteSIMMWaitingSetSectorLayoutReply);
     }
 }
 
@@ -326,17 +322,8 @@ void Programmer::writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t l
         writeOffset = startOffset;
         writeLength = length;
 
-        // Based on the SIMM type, tell the programmer board.
-        uint8_t setLayoutCommand;
-        if (SIMMChip() == SIMM_TSOP_x8)
-        {
-            setLayoutCommand = SetSIMMLayout_AddressShifted;
-        }
-        else
-        {
-            setLayoutCommand = SetSIMMLayout_AddressStraight;
-        }
-        startProgrammerCommand(setLayoutCommand, WritePortionWaitingSetSizeReply);
+        // Start out by trying to send the current known sector layout.
+        startProgrammerCommand(SetSectorLayout, WritePortionWaitingSetSectorLayoutReply);
     }
 }
 
@@ -375,6 +362,68 @@ void Programmer::handleChar(uint8_t c)
     {
     case WaitingForNextCommand:
         // Not expecting anything. Ignore it.
+        break;
+
+    // Expecting reply after we told the programmer the sector layout to use.
+    // Go ahead and send the sector layout even if we're doing a full erase.
+    // It makes the code more maintainable and opens up possibilities for the future.
+    case WriteSIMMWaitingSetSectorLayoutReply:
+    case WritePortionWaitingSetSectorLayoutReply:
+        switch (c)
+        {
+        case CommandReplyOK:
+            // We are talking with firmware that supports receiving sector layout data! Yay!
+            for (int i = 0; i < sectorGroups.count(); i++)
+            {
+                // Send the count of sectors in this group
+                sendWord(sectorGroups[i].first);
+                // Send the size of each sector in this group
+                sendWord(sectorGroups[i].second);
+            }
+            // Send a 0 to terminate the list of sector groups.
+            sendWord(0);
+            // This should cause the programmer to respond back to us with a yea or nay.
+            curState = (curState == WriteSIMMWaitingSetSectorLayoutReply) ?
+                        WriteSIMMWaitingSectorLayoutDataReply : WritePortionWaitingSectorLayoutDataReply;
+            break;
+        case CommandReplyInvalid:
+        case CommandReplyError:
+        default:
+            // If this command fails, just silently ignore the error and move
+            // onto setting the SIMM address unlock pattern instead.
+            uint8_t setLayoutCommand = (SIMMChip() == SIMM_TSOP_x8) ?
+                    SetSIMMLayout_AddressShifted : SetSIMMLayout_AddressStraight;
+            ProgrammerCommandState newState = (curState == WriteSIMMWaitingSetSectorLayoutReply) ?
+                        WriteSIMMWaitingSetSizeReply : WritePortionWaitingSetSizeReply;
+            startProgrammerCommand(setLayoutCommand, newState);
+        }
+        break;
+
+    // Expecting reply after the programmer allowed us to send the sector layout
+    case WriteSIMMWaitingSectorLayoutDataReply:
+    case WritePortionWaitingSectorLayoutDataReply:
+        switch (c)
+        {
+        case CommandReplyOK: {
+            // All good! Now move onto setting the SIMM address unlock pattern
+            uint8_t setLayoutCommand = (SIMMChip() == SIMM_TSOP_x8) ?
+                    SetSIMMLayout_AddressShifted : SetSIMMLayout_AddressStraight;
+            ProgrammerCommandState newState = (curState == WriteSIMMWaitingSectorLayoutDataReply) ?
+                        WriteSIMMWaitingSetSizeReply : WritePortionWaitingSetSizeReply;
+            startProgrammerCommand(setLayoutCommand, newState);
+            break;
+        }
+        case CommandReplyInvalid:
+        case CommandReplyError:
+            // Error after trying to send the sector layout. The firmware clearly supports the command,
+            // so we need to return an error.
+            qDebug() << "Error reply sending erase sector layout.";
+            curState = WaitingForNextCommand;
+            closePort();
+            emit writeStatusChanged(WriteError);
+            break;
+        }
+
         break;
 
     // Expecting reply after we told the programmer the size of SIMM to expect
