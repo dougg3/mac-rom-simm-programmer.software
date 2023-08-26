@@ -377,6 +377,13 @@
                   </spacer>
                  </item>
                  <item>
+                  <widget class="QPushButton" name="verifyROMChecksumButton">
+                   <property name="text">
+                    <string>Verify ROM Checksum...</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
                   <widget class="QPushButton" name="readFromSIMMButton">
                    <property name="text">
                     <string>Read from SIMM</string>

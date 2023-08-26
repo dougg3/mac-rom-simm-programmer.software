@@ -107,6 +107,10 @@ private slots:
     void on_multiReadChipsButton_clicked();
     void finishMultiRead();
 
+    void on_verifyROMChecksumButton_clicked();
+    void finishChecksumVerify();
+    bool calculateROMChecksum(QByteArray const &rom, uint32_t len, uint32_t &checksum);
+
     void on_selectBaseROMButton_clicked();
     void on_selectDiskImageButton_clicked();
     void on_chosenBaseROMFile_textEdited(const QString &text);
@@ -131,6 +135,7 @@ private:
     QString electricalTestString;
     QBuffer *writeBuffer;
     QBuffer *readBuffer;
+    QBuffer *checksumVerifyBuffer;
     QByteArray compressedImageFileHash;
     QByteArray compressedImage;
     QMessageBox *activeMessageBox;

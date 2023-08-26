@@ -107,6 +107,7 @@ MainWindow::MainWindow(QWidget *parent) :
     readFile(NULL),
     writeBuffer(NULL),
     readBuffer(NULL),
+    checksumVerifyBuffer(NULL),
     activeMessageBox(NULL)
 {
     initializing = true;
@@ -324,6 +325,11 @@ void MainWindow::on_readFromSIMMButton_clicked()
         delete readBuffer;
         readBuffer = NULL;
     }
+    if (checksumVerifyBuffer)
+    {
+        delete checksumVerifyBuffer;
+        checksumVerifyBuffer = NULL;
+    }
     if (readFile)
     {
         readFile->close();
@@ -367,6 +373,11 @@ void MainWindow::doInternalWrite(QIODevice *device)
     {
         delete readBuffer;
         readBuffer = NULL;
+    }
+    if (checksumVerifyBuffer)
+    {
+        delete checksumVerifyBuffer;
+        checksumVerifyBuffer = NULL;
     }
     if (writeFile)
     {
@@ -863,11 +874,26 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
         }
 
         returnToControlPage();
-        showMessageBox(QMessageBox::Information, "Read complete", "The read operation finished.");
+
+        // Do the checksum verify finish *after* returning to the control page.
+        if (checksumVerifyBuffer)
+        {
+            finishChecksumVerify();
+        }
+        else
+        {
+            // Normal reads just show a message box
+            showMessageBox(QMessageBox::Information, "Read complete", "The read operation finished.");
+        }
         if (readBuffer)
         {
             delete readBuffer;
             readBuffer = NULL;
+        }
+        if (checksumVerifyBuffer)
+        {
+            delete checksumVerifyBuffer;
+            checksumVerifyBuffer = NULL;
         }
         break;
     case ReadError:
@@ -885,6 +911,11 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
             delete readBuffer;
             readBuffer = NULL;
         }
+        if (checksumVerifyBuffer)
+        {
+            delete checksumVerifyBuffer;
+            checksumVerifyBuffer = NULL;
+        }
         break;
     case ReadCancelled:
         if (readFile)
@@ -901,6 +932,11 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
             delete readBuffer;
             readBuffer = NULL;
         }
+        if (checksumVerifyBuffer)
+        {
+            delete checksumVerifyBuffer;
+            checksumVerifyBuffer = NULL;
+        }
         break;
     case ReadTimedOut:
         if (readFile)
@@ -916,6 +952,11 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
         {
             delete readBuffer;
             readBuffer = NULL;
+        }
+        if (checksumVerifyBuffer)
+        {
+            delete checksumVerifyBuffer;
+            checksumVerifyBuffer = NULL;
         }
         break;
     }
@@ -1740,6 +1781,11 @@ void MainWindow::on_multiReadChipsButton_clicked()
         delete readBuffer;
     }
     readBuffer = new QBuffer();
+    if (checksumVerifyBuffer)
+    {
+        delete checksumVerifyBuffer;
+        checksumVerifyBuffer = NULL;
+    }
 
     // Try to open each file to make sure it's writable first. Then close it.
     bool hadError = false;
@@ -1849,6 +1895,184 @@ void MainWindow::finishMultiRead()
             delete files[x];
         }
     }
+}
+
+void MainWindow::on_verifyROMChecksumButton_clicked()
+{
+    // Make sure we're in checksum verify mode
+    if (writeBuffer)
+    {
+        delete writeBuffer;
+        writeBuffer = NULL;
+    }
+    if (readBuffer)
+    {
+        delete readBuffer;
+        readBuffer = NULL;
+    }
+    if (readFile)
+    {
+        readFile->close();
+        delete readFile;
+        readFile = NULL;
+    }
+
+    // Set up the checksum verification buffer
+    if (checksumVerifyBuffer)
+    {
+        delete checksumVerifyBuffer;
+    }
+    checksumVerifyBuffer = new QBuffer();
+
+    // Open up the buffer to read into
+    checksumVerifyBuffer->open(QFile::ReadWrite);
+
+    // Now start reading it!
+    resetAndShowStatusPage();
+    p->readSIMM(checksumVerifyBuffer);
+}
+
+void MainWindow::finishChecksumVerify()
+{
+    QByteArray const &bufferBytes = checksumVerifyBuffer->buffer();
+
+    if (bufferBytes.length() < 0x44)
+    {
+        showMessageBox(QMessageBox::Warning, "Checksum verify error", "The programmer was unable to read enough data to verify the checksum.");
+        return;
+    }
+
+    // Pull out the checksum
+    uint32_t checksumInROM = 0;
+    checksumInROM |= static_cast<uint8_t>(bufferBytes.at(0x0)) << 24;
+    checksumInROM |= static_cast<uint8_t>(bufferBytes.at(0x1)) << 16;
+    checksumInROM |= static_cast<uint8_t>(bufferBytes.at(0x2)) << 8;
+    checksumInROM |= static_cast<uint8_t>(bufferBytes.at(0x3)) << 0;
+
+    // Pull out the length
+    uint32_t romLength = 0;
+    romLength |= static_cast<uint8_t>(bufferBytes.at(0x40)) << 24;
+    romLength |= static_cast<uint8_t>(bufferBytes.at(0x41)) << 16;
+    romLength |= static_cast<uint8_t>(bufferBytes.at(0x42)) << 8;
+    romLength |= static_cast<uint8_t>(bufferBytes.at(0x43)) << 0;
+
+    uint8_t romVersion = static_cast<uint8_t>(bufferBytes.at(0x09));
+
+    // ROM versions up to 0x78 don't have the ROM length embedded.
+    // It's unclear whether ROM 0x79 has the ROM length embedded or not.
+    if (romVersion < 0x7A)
+    {
+        romLength = 0;
+
+        // Check the checksum based on a few random possible checksum lengths
+        // in order to determine the ROM length
+        uint32_t tmpChecksum;
+        for (uint32_t tmpLen = 64*1024; tmpLen <= 512*1024; tmpLen *= 2)
+        {
+            if (calculateROMChecksum(bufferBytes, tmpLen, tmpChecksum) && (tmpChecksum == checksumInROM))
+            {
+                romLength = tmpLen;
+                break;
+            }
+        }
+
+        if (romLength == 0)
+        {
+            showMessageBox(QMessageBox::Warning, "Checksum verify error",
+                           "This appears to be an older Mac ROM (before version 7A) or invalid data that isn't actually a Mac ROM. The checksum doesn't match.");
+            return;
+        }
+    }
+
+    if (romLength > 4 * 1048576 || romLength % (64*1024))
+    {
+        showMessageBox(QMessageBox::Warning, "Checksum verify error",
+                       QString("This appears to not be a valid Mac ROM. The ROM header says it is %1 in size. It may be damaged, or not a Mac ROM at all.")
+                       .arg(displayableFileSize(romLength)));
+        return;
+    }
+    else if (static_cast<uint32_t>(bufferBytes.length()) < romLength)
+    {
+        showMessageBox(QMessageBox::Warning, "Checksum verify error",
+                       QString("According to the ROM header, this is a %1 ROM. Make sure you are reading at least that much data in order to verify the checksum.")
+                        .arg(displayableFileSize(romLength)));
+        return;
+    }
+
+    uint32_t actualChecksum = 0;
+    if (calculateROMChecksum(bufferBytes, romLength, actualChecksum) && (actualChecksum == checksumInROM))
+    {
+        QString checksumInROMString = QString("%1").arg(checksumInROM, 8, 16, QChar('0')).toUpper();
+        QString finalMessage = QString("The checksum of this ROM image comes out correct. The checksum is %1.\n\n")
+                .arg(checksumInROMString);
+
+        // Customize the message based on old or new ROM
+        if (romVersion < 0x7A)
+        {
+            QString romVersionString = QString("%1").arg(romVersion, 2, 16, QChar('0')).toUpper();
+            finalMessage += QString("This is an older ROM (version %1) and the length was deduced to be %2.")
+                    .arg(romVersionString)
+                    .arg(displayableFileSize(romLength));
+        }
+        else
+        {
+            finalMessage += QString("According to the ROM header, it is a %1 ROM.").arg(displayableFileSize(romLength));
+        }
+
+        // Go ahead and identify it by checksum, if we can.
+        for (size_t i = 0; i < sizeof(romChecksumsAndModels) / sizeof(romChecksumsAndModels[0]); i++)
+        {
+            if (romChecksumsAndModels[i].checksum == actualChecksum)
+            {
+                finalMessage += QString("\n\nThis appears to be a standard Macintosh %1 ROM image.").arg(romChecksumsAndModels[i].model);
+                break;
+            }
+        }
+
+        showMessageBox(QMessageBox::Information, "Checksum matches", finalMessage);
+    }
+    else
+    {
+        // This *might* not be an error. The ROM might be patched.
+        if (identifyBaseROM(&bufferBytes) != BaseROMUnknown)
+        {
+            QString finalMessage = QString("The checksum in this ROM does not match. However, it appears to be a patched ROM, so it's normal for the checksum to not match.\n\nAccording to the ROM header, it is a %1 ROM.")
+                    .arg(displayableFileSize(romLength));
+
+            // It's been hacked. So don't treat it as an error
+            showMessageBox(QMessageBox::Information, "Checksum doesn't match", finalMessage);
+        }
+        else
+        {
+            QString checksumInROMString = QString("%1").arg(checksumInROM, 8, 16, QChar('0')).toUpper();
+            QString actualChecksumString = QString("%1").arg(actualChecksum, 8, 16, QChar('0')).toUpper();
+            QString finalMessage = QString("The checksum in this ROM does not match. The header says the checksum is %1, but the checksum is actually %2.\n\nAccording to the ROM header, it is a %3 ROM.\n\nThis might not actually be a problem if this is a programmable ROM SIMM and the ROM has been intentionally patched.")
+                    .arg(checksumInROMString)
+                    .arg(actualChecksumString)
+                    .arg(displayableFileSize(romLength));
+            showMessageBox(QMessageBox::Warning, "Checksum doesn't match", finalMessage);
+        }
+    }
+}
+
+bool MainWindow::calculateROMChecksum(const QByteArray &rom, uint32_t len, uint32_t &checksum)
+{
+    if (static_cast<uint32_t>(rom.length()) < len)
+    {
+        return false;
+    }
+
+    // Now calculate the checksum
+    checksum = 0;
+    for (uint32_t i = 4; i < len; i += 2)
+    {
+        uint16_t thisWord = 0;
+        thisWord |= static_cast<uint8_t>(rom.at(i + 0)) << 8;
+        thisWord |= static_cast<uint8_t>(rom.at(i + 1)) << 0;
+        checksum += thisWord;
+    }
+
+    return true;
 }
 
 void MainWindow::returnToControlPage()
