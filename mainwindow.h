@@ -72,6 +72,8 @@ private slots:
     void programmerFirmwareFlashTotalLengthChanged(uint32_t totalLen);
     void programmerFirmwareFlashCompletionLengthChanged(uint32_t len);
 
+    void programmerFirmwareVersionStatusChanged(ReadFirmwareVersionStatus status, uint32_t version);
+
     void on_electricalTestButton_clicked();
 
     void on_actionUpdate_firmware_triggered();
@@ -86,6 +88,7 @@ private slots:
     void on_simmCapacityBox_currentIndexChanged(int index);
 
     void on_actionAbout_SIMM_Programmer_triggered();
+    void on_actionCheck_Firmware_Version_triggered();
 
     void on_verifyBox_currentIndexChanged(int index);
     void on_createVerifyBox_currentIndexChanged(int index);

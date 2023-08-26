@@ -134,6 +134,7 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->pages->setCurrentWidget(ui->notConnectedPage);
     ui->tabWidget->setCurrentWidget(ui->writeTab);
     ui->actionUpdate_firmware->setEnabled(false);
+    ui->actionCheck_Firmware_Version->setEnabled(false);
 
     // Fill in the list of SIMM chip capacities (programmer can support anywhere up to 8 MB of space)
     for (size_t i = 0; i < sizeof(simmTable)/sizeof(simmTable[0]); i++)
@@ -246,6 +247,7 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(p, SIGNAL(programmerBoardConnected()), SLOT(programmerBoardConnected()));
     connect(p, SIGNAL(programmerBoardDisconnected()), SLOT(programmerBoardDisconnected()));
     connect(p, SIGNAL(programmerBoardDisconnectedDuringOperation()), SLOT(programmerBoardDisconnectedDuringOperation()));
+    connect(p, SIGNAL(readFirmwareVersionStatusChanged(ReadFirmwareVersionStatus,uint32_t)), SLOT(programmerFirmwareVersionStatusChanged(ReadFirmwareVersionStatus,uint32_t)));
     p->startCheckingPorts();
 
     // Set up the multi chip flasher UI -- connect signals
@@ -1200,7 +1202,6 @@ void MainWindow::programmerFirmwareFlashCompletionLengthChanged(uint32_t len)
     ui->progressBar->setValue((int)len);
 }
 
-
 void MainWindow::on_actionUpdate_firmware_triggered()
 {
     QString filename = QFileDialog::getOpenFileName(this, "Select a firmware image:");
@@ -1230,6 +1231,7 @@ void MainWindow::programmerBoardConnected()
 {
     returnToControlPage();
     ui->actionUpdate_firmware->setEnabled(true);
+    ui->actionCheck_Firmware_Version->setEnabled(true);
 }
 
 void MainWindow::programmerBoardDisconnected()
@@ -1242,12 +1244,14 @@ void MainWindow::programmerBoardDisconnected()
     }
     ui->pages->setCurrentWidget(ui->notConnectedPage);
     ui->actionUpdate_firmware->setEnabled(false);
+    ui->actionCheck_Firmware_Version->setEnabled(false);
 }
 
 void MainWindow::programmerBoardDisconnectedDuringOperation()
 {
     ui->pages->setCurrentWidget(ui->notConnectedPage);
     ui->actionUpdate_firmware->setEnabled(false);
+    ui->actionCheck_Firmware_Version->setEnabled(false);
     // Make sure any files have been closed if we were in the middle of something.
     if (writeFile)
     {
@@ -1270,6 +1274,8 @@ void MainWindow::resetAndShowStatusPage()
     ui->progressBar->setRange(0, 0);
     ui->statusLabel->setText("Communicating with programmer (this may take a few seconds)...");
     ui->pages->setCurrentWidget(ui->statusPage);
+    ui->actionUpdate_firmware->setEnabled(false);
+    ui->actionCheck_Firmware_Version->setEnabled(false);
 }
 
 void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
@@ -1856,6 +1862,9 @@ void MainWindow::returnToControlPage()
     {
         ui->pages->setCurrentWidget(ui->controlPage);
     }
+
+    ui->actionUpdate_firmware->setEnabled(true);
+    ui->actionCheck_Firmware_Version->setEnabled(true);
 }
 
 void MainWindow::on_selectBaseROMButton_clicked()
@@ -2588,5 +2597,52 @@ void MainWindow::on_actionCreate_blank_disk_image_triggered()
                 QMessageBox::warning(this, "File save error", "Unable to open the blank disk image file for writing.");
             }
         }
+    }
+}
+
+void MainWindow::on_actionCheck_Firmware_Version_triggered()
+{
+    resetAndShowStatusPage();
+    p->requestFirmwareVersion();
+}
+
+void MainWindow::programmerFirmwareVersionStatusChanged(ReadFirmwareVersionStatus status, uint32_t version)
+{
+    returnToControlPage();
+
+    switch (status)
+    {
+    case ReadFirmwareVersionSucceeded: {
+        const uint8_t major = (version >> 24) & 0xFF;
+        const uint8_t minor = (version >> 16) & 0xFF;
+        const uint8_t revision = (version >> 8) & 0xFF;
+        const uint8_t extra = (version >> 0) & 0xFF;
+        QString extraString = "";
+        if (extra != 0)
+        {
+            if (extra == 1)
+            {
+                extraString = " prerelease";
+            }
+            else
+            {
+                extraString = " (unknown special version)";
+            }
+        }
+        showMessageBox(QMessageBox::Information, "Firmware check complete", QString("This programmer is running firmware version %1.%2.%3%4.")
+                       .arg(major)
+                       .arg(minor)
+                       .arg(revision)
+                       .arg(extraString));
+        break;
+    }
+    case ReadFirmwareVersionCommandNotSupported:
+        showMessageBox(QMessageBox::Information, "Firmware check complete", "This programmer's firmware is out of date. You should install the latest firmware from:\n\n"
+                        "https://github.com/dougg3/mac-rom-simm-programmer/releases");
+        break;
+    case ReadFirmwareVersionError:
+    default:
+        showMessageBox(QMessageBox::Warning, "Error checking firmware version", "Unable to determine the firmware version.");
+        break;
     }
 }

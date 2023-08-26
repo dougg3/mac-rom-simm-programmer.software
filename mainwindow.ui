@@ -829,7 +829,9 @@
     <property name="title">
      <string>Advanced</string>
     </property>
+    <addaction name="actionCheck_Firmware_Version"/>
     <addaction name="actionUpdate_firmware"/>
+    <addaction name="separator"/>
     <addaction name="actionExtended_UI"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
@@ -874,6 +876,11 @@
   <action name="actionCreate_blank_disk_image">
    <property name="text">
     <string>Create blank disk image...</string>
+   </property>
+  </action>
+  <action name="actionCheck_Firmware_Version">
+   <property name="text">
+    <string>Check firmware version...</string>
    </property>
   </action>
  </widget>
