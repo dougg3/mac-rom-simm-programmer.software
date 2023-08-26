@@ -810,19 +810,19 @@ void MainWindow::programmerElectricalTestStatusChanged(ElectricalTestStatus newS
         qDebug() << "Electrical test started";
         break;
     case ElectricalTestPassed:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Information, "Test passed", "The electrical test passed successfully.");
         break;
     case ElectricalTestFailed:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Warning, "Test failed", "The electrical test failed:\n\n" + electricalTestString);
         break;
     case ElectricalTestTimedOut:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Warning, "Test timed out", "The electrical test operation timed out.");
         break;
     case ElectricalTestCouldntStart:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Warning, "Communication error", "Unable to communicate with programmer board.");
         break;
     }
@@ -938,7 +938,7 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
         break;
     case IdentificationComplete:
     {
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         QString identifyString = "The chips identified themselves as:";
 
         // Get the straight and shifted unlock results from the identification command
@@ -1150,15 +1150,15 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
         break;
     }
     case IdentificationError:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Warning, "Identification error", "An error occurred identifying the chips on the SIMM.");
         break;
     case IdentificationTimedOut:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Warning, "Identification timed out", "The identification operation timed out.");
         break;
     case IdentificationNeedsFirmwareUpdate:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
         break;
     }
@@ -1172,19 +1172,19 @@ void MainWindow::programmerFirmwareFlashStatusChanged(FirmwareFlashStatus newSta
         ui->statusLabel->setText("Flashing new firmware...");
         break;
     case FirmwareFlashComplete:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Information, "Firmware update complete", "The firmware update operation finished.");
         break;
     case FirmwareFlashError:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Warning, "Firmware update error", "An error occurred writing firmware to the device.");
         break;
     case FirmwareFlashCancelled:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Warning, "Firmware update cancelled", "The firmware update was cancelled.");
         break;
     case FirmwareFlashTimedOut:
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         showMessageBox(QMessageBox::Warning, "Firmware update timed out", "The firmware update operation timed out.");
         break;
     }
@@ -1407,7 +1407,7 @@ void MainWindow::on_flashIndividualEnterButton_clicked()
 void MainWindow::on_returnNormalButton_clicked()
 {
     hideFlashIndividualControls(); // to allow the window to be shrunk when not active
-    ui->pages->setCurrentWidget(ui->controlPage);
+    returnToControlPage();
 }
 
 void MainWindow::hideFlashIndividualControls()
