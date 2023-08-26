@@ -1410,6 +1410,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            delete firmwareFile;
+            firmwareFile = NULL;
             emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
@@ -1421,6 +1423,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            delete firmwareFile;
+            firmwareFile = NULL;
             emit firmwareFlashStatusChanged(FirmwareFlashComplete);
         }
         else
@@ -1428,6 +1432,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            delete firmwareFile;
+            firmwareFile = NULL;
             emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
@@ -1469,6 +1475,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            delete firmwareFile;
+            firmwareFile = NULL;
             emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
@@ -1494,6 +1502,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            delete firmwareFile;
+            firmwareFile = NULL;
             emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
