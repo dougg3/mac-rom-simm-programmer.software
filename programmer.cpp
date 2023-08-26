@@ -77,7 +77,11 @@ typedef enum ProgrammerCommandState
     WritePortionWaitingEraseReply,
     WritePortionWaitingEraseConfirmation,
     WritePortionWaitingEraseResult,
-    WritePortionWaitingWriteAtReply
+    WritePortionWaitingWriteAtReply,
+
+    ReadFWVersionAwaitingOKReply,
+    ReadFWVersionWaitingData,
+    ReadFWVersionAwaitingDoneReply
 } ProgrammerCommandState;
 
 typedef enum ProgrammerBoardFoundState
@@ -107,7 +111,8 @@ typedef enum ProgrammerCommand
     WriteChipsAt,
     ReadChipsAt,
     SetChipsMask,
-    SetSectorLayout
+    SetSectorLayout,
+    GetFirmwareVersion
 } ProgrammerCommand;
 
 typedef enum ProgrammerReply
@@ -184,6 +189,11 @@ typedef enum ProgrammerErasePortionOfChipReply
     ProgrammerErasePortionError,
     ProgrammerErasePortionFinished
 } ProgrammerErasePortionOfChipReply;
+
+typedef enum ProgrammerGetFWVersionReply
+{
+    ProgrammerGetFWVersionDone
+} ProgrammerGetFWVersionReply;
 
 #define PROGRAMMER_USB_VENDOR_ID            0x16D0
 #define PROGRAMMER_USB_DEVICE_ID            0x06AA
@@ -1488,6 +1498,58 @@ void Programmer::handleChar(uint8_t c)
         }
         break;
 
+    // READ FIRMWARE VERSION STATE HANDLERS
+
+    // Expecting reply after we asked for the firmware to report its version
+    case ReadFWVersionAwaitingOKReply:
+        if (c == CommandReplyOK)
+        {
+            // We should now be expecting to receive 4 bytes containing the firmware
+            firmwareVersionBeingAssembled = 0;
+            firmwareVersionNextExpectedByte = 0;
+            curState = ReadFWVersionWaitingData;
+        }
+        else if (c == CommandReplyInvalid)
+        {
+            // This is an older firmware not supported
+            curState = WaitingForNextCommand;
+            closePort();
+            emit readFirmwareVersionStatusChanged(ReadFirmwareVersionCommandNotSupported, 0);
+        }
+        else
+        {
+            // Error occurred
+            curState = WaitingForNextCommand;
+            closePort();
+            emit readFirmwareVersionStatusChanged(ReadFirmwareVersionError, 0);
+        }
+        break;
+
+    // Reading the firmware version data
+    case ReadFWVersionWaitingData:
+        firmwareVersionBeingAssembled <<= 8;
+        firmwareVersionBeingAssembled |= c;
+        firmwareVersionNextExpectedByte++;
+        if (firmwareVersionNextExpectedByte >= 4)
+        {
+            curState = ReadFWVersionAwaitingDoneReply;
+        }
+        break;
+
+    // Waiting for the final OK reply
+    case ReadFWVersionAwaitingDoneReply:
+        closePort();
+        curState = WaitingForNextCommand;
+        if (c == ProgrammerGetFWVersionDone)
+        {
+            emit readFirmwareVersionStatusChanged(ReadFirmwareVersionSucceeded, firmwareVersionBeingAssembled);
+        }
+        else
+        {
+            emit readFirmwareVersionStatusChanged(ReadFirmwareVersionError, 0);
+        }
+        break;
+
     // UNUSED STATE HANDLERS (They are handled elsewhere)
     case BootloaderStateAwaitingPlug:
     case BootloaderStateAwaitingUnplug:
@@ -1578,6 +1640,11 @@ void Programmer::getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *
         *manufacturer = 0;
         *device = 0;
     }
+}
+
+void Programmer::requestFirmwareVersion()
+{
+    startProgrammerCommand(GetFirmwareVersion, ReadFWVersionAwaitingOKReply);
 }
 
 void Programmer::flashFirmware(QString filename)

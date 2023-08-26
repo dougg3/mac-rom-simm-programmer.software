@@ -110,6 +110,13 @@ typedef enum ProgrammerRevision
     ProgrammerRevisionM258KE = 2
 } ProgrammerRevision;
 
+typedef enum ReadFirmwareVersionStatus
+{
+    ReadFirmwareVersionCommandNotSupported,
+    ReadFirmwareVersionError,
+    ReadFirmwareVersionSucceeded
+} ReadFirmwareVersionStatus;
+
 // Electrical test indexes
 #define GROUND_FAIL_INDEX					0xFF
 #define VCC_FAIL_INDEX						0xFE
@@ -139,6 +146,7 @@ public:
     QString electricalTestPinName(uint8_t index);
     void identifySIMMChips();
     void getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device, bool shiftedUnlock);
+    void requestFirmwareVersion();
     void flashFirmware(QString filename);
     void startCheckingPorts();
     void setSIMMType(uint32_t bytes, uint32_t chip_type);
@@ -171,6 +179,8 @@ signals:
     void firmwareFlashStatusChanged(FirmwareFlashStatus status);
     void firmwareFlashTotalLengthChanged(uint32_t total);
     void firmwareFlashCompletionLengthChanged(uint32_t total);
+
+    void readFirmwareVersionStatusChanged(ReadFirmwareVersionStatus status, uint32_t version);
 
     void programmerBoardConnected();
     void programmerBoardDisconnected();
@@ -225,6 +235,9 @@ private:
     uint32_t writeOffset;
     uint32_t writeLength;
     uint8_t writeChipMask;
+
+    uint32_t firmwareVersionBeingAssembled;
+    uint8_t firmwareVersionNextExpectedByte;
 
     ChipID _chipID;
 
