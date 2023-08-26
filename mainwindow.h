@@ -154,7 +154,7 @@ private:
 
     bool checkBaseROMValidity(QString &errorText);
     bool checkBaseROMCompressionSupport();
-    KnownBaseROM identifyBaseROM();
+    KnownBaseROM identifyBaseROM(QByteArray const *baseROMToCheck = NULL);
     bool checkDiskImageValidity(QString &errorText, bool &alreadyCompressed);
     bool isCompressedDiskImage(QByteArray const &image);
     void compressImageInBackground(QByteArray uncompressedImage, bool blockUntilCompletion);

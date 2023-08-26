@@ -2074,9 +2074,13 @@ bool MainWindow::checkBaseROMCompressionSupport()
     return unpatchedBaseROM().contains(" block-compressed disk image");
 }
 
-MainWindow::KnownBaseROM MainWindow::identifyBaseROM()
+MainWindow::KnownBaseROM MainWindow::identifyBaseROM(QByteArray const *baseROMToCheck)
 {
-    QByteArray baseROM = unpatchedBaseROM();
+    QByteArray baseROM = !baseROMToCheck ? unpatchedBaseROM() : *baseROMToCheck;
+    if (baseROM.length() < 0x51DC4)
+    {
+        return BaseROMUnknown;
+    }
 
     if (baseROM.contains("Garrett's Workshop ROM Disk"))
     {
