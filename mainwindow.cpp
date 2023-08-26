@@ -100,6 +100,11 @@ static const struct
     {0x87D3C814UL, "Quadra 660av or 840av"},
 };
 
+static const QByteArray multiFirmwareDelimiter(
+        "\xDB\x00\xDB\x01\xDB\x02\xDB\x03\xDB\x04\xDB\x05\xDB\x06\xDB\x07"
+        "\xDB\x08\xDB\x09\xDB\x0A\xDB\x0B\xDB\x0C\xDB\x0D\xDB\x0E\xDB\x0F"
+        "\xDB\xDB\xDB\xDB\xAA\xAA\xAA\xAA\xDB\xDB\xDB\xDB\x55\x55\x55\x55", 48);
+
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow),
@@ -2656,6 +2661,26 @@ void MainWindow::compressorThreadFinished(QByteArray hashOfOriginal, QByteArray 
     compressedImageFileHash = hashOfOriginal;
     compressedImage = compressedData;
     updateCreateROMControlStatus();
+}
+
+QList<QByteArray> MainWindow::separateFirmwareIntoVersions(QByteArray totalFirmware)
+{
+    QList<QByteArray> firmwares;
+
+    while (totalFirmware.contains(multiFirmwareDelimiter))
+    {
+        int index = totalFirmware.indexOf(multiFirmwareDelimiter);
+        firmwares.append(totalFirmware.mid(0, index));
+        totalFirmware.remove(0, index + multiFirmwareDelimiter.length());
+    }
+
+    // As long as we have something left, also append it
+    if (!totalFirmware.isEmpty())
+    {
+        firmwares.append(totalFirmware);
+    }
+
+    return firmwares;
 }
 
 bool MainWindow::firmwareIsCompatible(QString filename, QString &compatibilityError)

@@ -170,6 +170,7 @@ private:
     QByteArray createROM();
     QString displayableFileSize(qint64 size);
 
+    static QList<QByteArray> separateFirmwareIntoVersions(QByteArray totalFirmware);
     bool firmwareIsCompatible(QString filename, QString &compatibilityError);
 
     void showMessageBox(QMessageBox::Icon icon, const QString &title, const QString &text);
