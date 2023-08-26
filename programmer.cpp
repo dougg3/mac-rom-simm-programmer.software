@@ -1657,9 +1657,10 @@ void Programmer::requestFirmwareVersion()
     startProgrammerCommand(GetFirmwareVersion, ReadFWVersionAwaitingOKReply);
 }
 
-void Programmer::flashFirmware(QString filename)
+void Programmer::flashFirmware(QByteArray firmware)
 {
-    firmwareFile = new QFile(filename);
+    firmwareFile = new QBuffer();
+    firmwareFile->setData(firmware);
     if (!firmwareFile->open(QFile::ReadOnly))
     {
         curState = WaitingForNextCommand;

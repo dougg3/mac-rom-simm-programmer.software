@@ -147,7 +147,7 @@ public:
     void identifySIMMChips();
     void getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device, bool shiftedUnlock);
     void requestFirmwareVersion();
-    void flashFirmware(QString filename);
+    void flashFirmware(QByteArray firmware);
     void startCheckingPorts();
     void setSIMMType(uint32_t bytes, uint32_t chip_type);
     uint32_t SIMMCapacity() const;
@@ -192,7 +192,7 @@ private:
     //QFile *writeFile;
     QIODevice *readDevice;
     QIODevice *writeDevice;
-    QFile *firmwareFile;
+    QBuffer *firmwareFile;
 
     QextSerialPort *serialPort;
     void sendByte(uint8_t b);

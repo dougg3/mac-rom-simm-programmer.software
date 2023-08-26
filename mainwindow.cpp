@@ -1254,14 +1254,19 @@ void MainWindow::on_actionUpdate_firmware_triggered()
     if (!filename.isNull())
     {
         QString compatibilityError;
-        if (firmwareIsCompatible(filename, compatibilityError))
+        QByteArray firmware = findCompatibleFirmware(filename, compatibilityError);
+        if (!firmware.isEmpty())
         {
             resetAndShowStatusPage();
-            p->flashFirmware(filename);
+            p->flashFirmware(firmware);
             qDebug() << "Updating firmware...";
         }
         else
         {
+            if (compatibilityError.isEmpty())
+            {
+                compatibilityError = "Unknown error. Check to make sure you have the correct firmware file.";
+            }
             showMessageBox(QMessageBox::Warning, "Invalid firmware file", compatibilityError);
         }
     }
@@ -2683,18 +2688,54 @@ QList<QByteArray> MainWindow::separateFirmwareIntoVersions(QByteArray totalFirmw
     return firmwares;
 }
 
-bool MainWindow::firmwareIsCompatible(QString filename, QString &compatibilityError)
+QByteArray MainWindow::findCompatibleFirmware(QString filename, QString &compatibilityError)
 {
     QFile fwFile(filename);
     if (!fwFile.open(QFile::ReadOnly))
     {
         compatibilityError = "Unable to open the selected firmware file.";
-        return false;
+        return QByteArray();
     }
 
-    QByteArray firmware = fwFile.readAll();
+    QByteArray totalFirmware = fwFile.readAll();
     fwFile.close();
 
+    // Extract all different firmwares from this
+    QList<QByteArray> firmwares = separateFirmwareIntoVersions(totalFirmware);
+
+    // Make sure they are each firmware files, and try to find the first one that is compatible
+    int firmwaresFound = 0;
+    foreach (QByteArray const &firmware, firmwares)
+    {
+        bool isFirmwareFile = false;
+        if (firmwareIsCompatible(firmware, isFirmwareFile))
+        {
+            return firmware;
+        }
+
+        if (isFirmwareFile)
+        {
+            firmwaresFound++;
+        }
+    }
+
+    if (firmwaresFound == 0)
+    {
+        compatibilityError = "The selected file doesn't appear to be a programmer firmware file.";
+    }
+    else
+    {
+        compatibilityError = "The selected file is a SIMM programmer firmware file, "
+                             "but it isn't compatible with your programmer.\n\n"
+                             "Please download the correct firmware file from: "
+                             "https://github.com/dougg3/mac-rom-simm-programmer/releases";
+    }
+
+    return QByteArray();
+}
+
+bool MainWindow::firmwareIsCompatible(QByteArray const &firmware, bool &isFirmwareFile)
+{
     // Find the device descriptor in the dump. Locate it by
     // searching for the USB VID and PID, and then double-checking
     // that it's actually a device descriptor by verifying the surrounding data.
@@ -2730,6 +2771,7 @@ bool MainWindow::firmwareIsCompatible(QString filename, QString &compatibilityEr
                 if (revision == p->programmerRevision() ||
                     p->programmerRevision() == ProgrammerRevisionUnknown)
                 {
+                    isFirmwareFile = true;
                     return true;
                 }
 
@@ -2741,17 +2783,7 @@ bool MainWindow::firmwareIsCompatible(QString filename, QString &compatibilityEr
         }
     } while (index >= 0);
 
-    if (descriptorsFound == 0)
-    {
-        compatibilityError = "The selected file doesn't appear to be a programmer firmware file.";
-    }
-    else
-    {
-        compatibilityError = "The selected file is a SIMM programmer firmware file, "
-                             "but it isn't compatible with your programmer.\n\n"
-                             "Please download the correct firmware file from: "
-                             "https://github.com/dougg3/mac-rom-simm-programmer/releases";
-    }
+    isFirmwareFile = (descriptorsFound > 0);
     return false;
 }
 

@@ -171,7 +171,8 @@ private:
     QString displayableFileSize(qint64 size);
 
     static QList<QByteArray> separateFirmwareIntoVersions(QByteArray totalFirmware);
-    bool firmwareIsCompatible(QString filename, QString &compatibilityError);
+    QByteArray findCompatibleFirmware(QString filename, QString &compatibilityError);
+    bool firmwareIsCompatible(QByteArray const &firmware, bool &isFirmwareFile);
 
     void showMessageBox(QMessageBox::Icon icon, const QString &title, const QString &text);
     void setUseExtendedUI(bool extended);
