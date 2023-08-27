@@ -1,0 +1,44 @@
+; Manufacturer		Model			Width (Bits)	Capacity (KB)		Sector Sizes				Manufacturer Code	Product Code		Unlock Shifted
+Microchip			SST39SF010 		8				128 				32*4K						BF  				B5					No
+Microchip			SST39SF020 		8				256 				64*4K						BF  				B6					No
+Microchip			SST39SF040 		8				512 				128*4K						BF  				B7					No
+Greenliant			GLS29EE010 		8				128 				1024*128					BF  				07					No
+Greenliant			GLS29SF020 		8				256 				2048*128					BF  				24					No
+Greenliant			GLS29SF040 		8				512 				4096*128					BF  				13					No
+AMD					Am29F040B  		8				512 				8*64K						01  				A4					No
+Micron				M29F200FT  		8				256 				3*64K,32K,8K,8K,16K			01  				51					Yes
+Micron				M29F200FT  		16				256 				3*32K,16K,4K,4K,8K			0001				2251				No
+Micron				M29F200FB  		8				256 				16K,8K,8K,32K,3*64K			01  				57					Yes
+Micron				M29F200FB  		16				256 				8K,4K,4K,16K,3*32K			0001				2257				No
+Micron				M29F400FT  		8				512 				7*64K,32K,8K,8K,16K			01  				23					Yes
+Micron				M29F400FT  		16				512 				7*32K,16K,4K,4K,8K			0001				2223				No
+Micron				M29F400FB  		8				512 				16K,8K,8K,32K,7*64K			01  				AB					Yes
+Micron				M29F400FB  		16				512 				8K,4K,4K,16K,7*32K			0001				22AB				No
+Micron				M29F800FT  		8				1024				15*64K,32K,8K,8K,16K		01  				D6					Yes
+Micron				M29F800FT  		16				1024				15*32K,16K,4K,4K,8K			0001				22D6				No
+Micron				M29F800FB  		8				1024				16K,8K,8K,32K,15*64K		01  				58					Yes
+Micron				M29F800FB  		16				1024				8K,4K,4K,16K,15*32K			0001				2258				No
+Micron				M29F160FT  		8				2048				31*64K,32K,8K,8K,16K		01  				D2					Yes
+Micron				M29F160FT  		16				2048				31*32K,16K,4K,4K,8K			0001				22D2				No
+Micron				M29F160FB  		8				2048				16K,8K,8K,32K,31*64K		01  				D8					Yes
+Micron				M29F160FB  		16				2048				8K,4K,4K,16K,31*32K			0001				22D8				No
+Macronix			MX29F800CT 		8				1024				15*64K,32K,8K,8K,16K		C2  				D6					Yes
+Macronix			MX29F800CT 		16				1024				15*32K,16K,4K,4K,8K			00C2				22D6				No
+Macronix			MX29F800CB 		8				1024				16K,8K,8K,32K,15*64K		C2  				58					Yes
+Macronix			MX29F800CB 		16				1024				8K,4K,4K,16K,15*32K			00C2				2258				No
+;Macronix			MX29LV640ET		8				8192				127*64K,8*8K				C2  				C9					Yes
+;Macronix			MX29LV640ET		16				8192				127*32K,8*4K				00C2				22C9				No
+Macronix			MX29LV640EB		8				8192				8*8K,127*64K				C2  				CB					Yes
+Macronix			MX29LV640EB		16				8192				8*4K,127*32K				00C2				22CB				No
+;
+; HACKY FIXUPS BELOW:
+;
+; The original "correct" versions of the setup for the MX29LV640ET are commented out above.
+; Below are modified versions for use with the SIMM programmer and Mac ROM SIMMs.
+; We have to assume that the first 2 MB (4-chip) or 4 MB (2-chip) chunk of these chips has the special smaller sectors at the end.
+; This is because we only address a single 8 MB set of address space in the SIMM programmer. SIMMs that use this chip will have a method
+; for addressing any 8 MB chunk of the address space. We have no way of knowing which chunk we're currently addressing.
+; So assume that the tiny sectors are always at the end of the first chunk. If we don't do this and the last chunk is currently being used,
+; we won't erase everything. So this hack is super important for the Garrett's Workshop SIMM, for example.
+Macronix			MX29LV640ET		8				8192				31*64K,8*8K,95*64K,8*8K		C2  				C9					Yes
+Macronix			MX29LV640ET		16				8192				63*32K,8*4K,63*32K,8*4K		00C2				22C9				No

@@ -25,6 +25,7 @@
 #include <QIODevice>
 #include <qextserialport.h>
 #include <qextserialenumerator.h>
+#include "chipid.h"
 #include <stdint.h>
 #include <QBuffer>
 
@@ -102,6 +103,20 @@ typedef enum VerificationOption
     VerifyAfterWrite
 } VerificationOption;
 
+typedef enum ProgrammerRevision
+{
+    ProgrammerRevisionUnknown = 0,
+    ProgrammerRevisionAVR = 1,
+    ProgrammerRevisionM258KE = 2
+} ProgrammerRevision;
+
+typedef enum ReadFirmwareVersionStatus
+{
+    ReadFirmwareVersionCommandNotSupported,
+    ReadFirmwareVersionError,
+    ReadFirmwareVersionSucceeded
+} ReadFirmwareVersionStatus;
+
 // Electrical test indexes
 #define GROUND_FAIL_INDEX					0xFF
 #define VCC_FAIL_INDEX						0xFE
@@ -130,8 +145,9 @@ public:
     void runElectricalTest();
     QString electricalTestPinName(uint8_t index);
     void identifySIMMChips();
-    void getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device);
-    void flashFirmware(QString filename);
+    void getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device, bool shiftedUnlock);
+    void requestFirmwareVersion();
+    void flashFirmware(QByteArray firmware);
     void startCheckingPorts();
     void setSIMMType(uint32_t bytes, uint32_t chip_type);
     uint32_t SIMMCapacity() const;
@@ -139,6 +155,9 @@ public:
     void setVerifyMode(VerificationOption mode);
     VerificationOption verifyMode() const;
     uint8_t verifyBadChipMask() const { return _verifyBadChipMask; }
+    ProgrammerRevision programmerRevision() const;
+    bool selectedSIMMTypeUsesShiftedUnlock() const;
+    ChipID &chipID() { return _chipID; }
 signals:
     void startStatusChanged(StartStatus status);
 
@@ -161,6 +180,8 @@ signals:
     void firmwareFlashTotalLengthChanged(uint32_t total);
     void firmwareFlashCompletionLengthChanged(uint32_t total);
 
+    void readFirmwareVersionStatusChanged(ReadFirmwareVersionStatus status, uint32_t version);
+
     void programmerBoardConnected();
     void programmerBoardDisconnected();
     void programmerBoardDisconnectedDuringOperation();
@@ -171,7 +192,7 @@ private:
     //QFile *writeFile;
     QIODevice *readDevice;
     QIODevice *writeDevice;
-    QFile *firmwareFile;
+    QBuffer *firmwareFile;
 
     QextSerialPort *serialPort;
     void sendByte(uint8_t b);
@@ -192,10 +213,15 @@ private:
     uint32_t lenRemaining;
     uint32_t readOffset;
 
-    int identificationCounter;
-    uint8_t chipManufacturerIDs[4];
-    uint8_t chipDeviceIDs[4];
+    int identificationShiftCounter;
+    int identificationReadCounter;
+    uint8_t chipManufacturerIDs[2][4];
+    uint8_t chipDeviceIDs[2][4];
+    bool identifyIsForWriteAttempt;
+    bool identifyWriteIsEntireSIMM;
+    QList<QPair<uint16_t, uint32_t> > sectorGroups;
 
+    uint16_t detectedDeviceRevision;
     uint32_t firmwareLenRemaining;
     uint32_t firmwareLenWritten;
 
@@ -209,6 +235,11 @@ private:
     uint32_t writeOffset;
     uint32_t writeLength;
     uint8_t writeChipMask;
+
+    uint32_t firmwareVersionBeingAssembled;
+    uint8_t firmwareVersionNextExpectedByte;
+
+    ChipID _chipID;
 
     void openPort();
     void closePort();

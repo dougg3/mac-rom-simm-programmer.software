@@ -11,18 +11,31 @@ TEMPLATE = app
 QMAKE_TARGET_BUNDLE_PREFIX = com.downtowndougbrown
 
 SOURCES += main.cpp\
+    3rdparty/fc8-compression.c \
+    chipid.cpp \
+    createblankdiskdialog.cpp \
     droppablegroupbox.cpp \
-        mainwindow.cpp \
+    fc8compressor.cpp \
+    labelwithlinks.cpp \
+    mainwindow.cpp \
     programmer.cpp \
-    aboutbox.cpp
+    aboutbox.cpp \
+    textbrowserwithlinks.cpp
 
 HEADERS  += mainwindow.h \
+    3rdparty/fc8-compression/fc8.h \
+    chipid.h \
+    createblankdiskdialog.h \
     droppablegroupbox.h \
+    fc8compressor.h \
+    labelwithlinks.h \
     programmer.h \
-    aboutbox.h
+    aboutbox.h \
+    textbrowserwithlinks.h
 
 FORMS    += mainwindow.ui \
-    aboutbox.ui
+    aboutbox.ui \
+    createblankdiskdialog.ui
 
 linux*:CONFIG += qesp_linux_udev
 include(3rdparty/qextserialport/src/qextserialport.pri)
@@ -45,7 +58,7 @@ lessThan(QT_MAJOR_VERSION, 5) {
 	win32:RC_ICONS = SIMMProgrammer.ico
 }
 
-VERSION = 1.2.0
+VERSION = 2.0.0
 DEFINES += VERSION_STRING=\\\"$$VERSION\\\"
 
 macx:QMAKE_INFO_PLIST = Info.plist
@@ -53,3 +66,9 @@ win32:QMAKE_TARGET_COMPANY = "Doug Brown"
 win32:QMAKE_TARGET_DESCRIPTION = "Mac ROM SIMM Programmer"
 win32:QMAKE_TARGET_COPYRIGHT = "Copyright (C) Doug Brown"
 win32:QMAKE_TARGET_PRODUCT = "Mac ROM SIMM Programmer"
+
+DISTFILES += \
+    chipid.txt
+
+RESOURCES += \
+    chipid.qrc

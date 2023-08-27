@@ -1,3 +1,6 @@
 [submodule "3rdparty/qextserialport"]
 	path = 3rdparty/qextserialport
-	url = https://github.com/qextserialport/qextserialport.git
+	url = https://github.com/dougg3/qextserialport.git
+[submodule "3rdparty/fc8-compression"]
+	path = 3rdparty/fc8-compression
+	url = https://github.com/steve-chamberlin/fc8-compression.git

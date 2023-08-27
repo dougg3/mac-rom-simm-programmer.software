@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/chipid">
+        <file>chipid.txt</file>
+    </qresource>
+</RCC>

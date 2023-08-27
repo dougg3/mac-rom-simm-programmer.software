@@ -27,6 +27,8 @@ typedef enum ProgrammerCommandState
 {
     WaitingForNextCommand = 0,
 
+    WriteSIMMWaitingSetSectorLayoutReply,
+    WriteSIMMWaitingSectorLayoutDataReply,
     WriteSIMMWaitingSetSizeReply,
     WriteSIMMWaitingSetVerifyModeReply,
     WriteSIMMWaitingSetChipMaskReply,
@@ -66,6 +68,8 @@ typedef enum ProgrammerCommandState
     BootloaderEraseProgramWaitingWriteMoreReply,
     BootloaderEraseProgramWaitingWriteReply,
 
+    WritePortionWaitingSetSectorLayoutReply,
+    WritePortionWaitingSectorLayoutDataReply,
     WritePortionWaitingSetSizeReply,
     WritePortionWaitingSetVerifyModeReply,
     WritePortionWaitingSetChipMaskReply,
@@ -73,7 +77,11 @@ typedef enum ProgrammerCommandState
     WritePortionWaitingEraseReply,
     WritePortionWaitingEraseConfirmation,
     WritePortionWaitingEraseResult,
-    WritePortionWaitingWriteAtReply
+    WritePortionWaitingWriteAtReply,
+
+    ReadFWVersionAwaitingOKReply,
+    ReadFWVersionWaitingData,
+    ReadFWVersionAwaitingDoneReply
 } ProgrammerCommandState;
 
 typedef enum ProgrammerBoardFoundState
@@ -102,7 +110,9 @@ typedef enum ProgrammerCommand
     ErasePortion,
     WriteChipsAt,
     ReadChipsAt,
-    SetChipsMask
+    SetChipsMask,
+    SetSectorLayout,
+    GetFirmwareVersion
 } ProgrammerCommand;
 
 typedef enum ProgrammerReply
@@ -180,6 +190,11 @@ typedef enum ProgrammerErasePortionOfChipReply
     ProgrammerErasePortionFinished
 } ProgrammerErasePortionOfChipReply;
 
+typedef enum ProgrammerGetFWVersionReply
+{
+    ProgrammerGetFWVersionDone
+} ProgrammerGetFWVersionReply;
+
 #define PROGRAMMER_USB_VENDOR_ID            0x16D0
 #define PROGRAMMER_USB_DEVICE_ID            0x06AA
 
@@ -201,8 +216,12 @@ static ProgrammerBoardFoundState foundState = ProgrammerBoardNotFound;
 static QString programmerBoardPortName;
 
 Programmer::Programmer(QObject *parent) :
-    QObject(parent)
+    QObject(parent),
+    _chipID(":/chipid/chipid.txt")
 {
+    detectedDeviceRevision = 0;
+    identifyIsForWriteAttempt = false;
+    identifyWriteIsEntireSIMM = false;
     _verifyMode = VerifyAfterWrite;
     _verifyBadChipMask = 0;
     verifyArray = new QByteArray();
@@ -281,17 +300,14 @@ void Programmer::writeToSIMM(QIODevice *device, uint8_t chipsMask)
         writeLenRemaining = writeDevice->size();
         writeOffset = 0;
 
-        // Based on the SIMM type, tell the programmer board.
-        uint8_t setLayoutCommand;
-        if (SIMMChip() == SIMM_TSOP_x8)
-        {
-            setLayoutCommand = SetSIMMLayout_AddressShifted;
-        }
-        else
-        {
-            setLayoutCommand = SetSIMMLayout_AddressStraight;
-        }
-        startProgrammerCommand(setLayoutCommand, WriteSIMMWaitingSetSizeReply);
+        // Start out by identifying the chips so that we can send the correct
+        // erase sector layout. We have to save some flags to indicate that the
+        // identification is the start of a write. This isn't strictly necessary
+        // for full chip erases, but I do it for consistency.
+        identifyIsForWriteAttempt = true;
+        identifyWriteIsEntireSIMM = true;
+        identificationShiftCounter = 0;
+        startProgrammerCommand(SetSIMMLayout_AddressStraight, IdentificationWaitingSetSizeReply);
     }
 }
 
@@ -324,17 +340,13 @@ void Programmer::writeToSIMM(QIODevice *device, uint32_t startOffset, uint32_t l
         writeOffset = startOffset;
         writeLength = length;
 
-        // Based on the SIMM type, tell the programmer board.
-        uint8_t setLayoutCommand;
-        if (SIMMChip() == SIMM_TSOP_x8)
-        {
-            setLayoutCommand = SetSIMMLayout_AddressShifted;
-        }
-        else
-        {
-            setLayoutCommand = SetSIMMLayout_AddressStraight;
-        }
-        startProgrammerCommand(setLayoutCommand, WritePortionWaitingSetSizeReply);
+        // Start out by identifying the chips so that we can send the correct
+        // erase sector layout. We have to save some flags to indicate that the
+        // identification is the start of a write.
+        identifyIsForWriteAttempt = true;
+        identifyWriteIsEntireSIMM = false;
+        identificationShiftCounter = 0;
+        startProgrammerCommand(SetSIMMLayout_AddressStraight, IdentificationWaitingSetSizeReply);
     }
 }
 
@@ -373,6 +385,68 @@ void Programmer::handleChar(uint8_t c)
     {
     case WaitingForNextCommand:
         // Not expecting anything. Ignore it.
+        break;
+
+    // Expecting reply after we told the programmer the sector layout to use.
+    // Go ahead and send the sector layout even if we're doing a full erase.
+    // It makes the code more maintainable and opens up possibilities for the future.
+    case WriteSIMMWaitingSetSectorLayoutReply:
+    case WritePortionWaitingSetSectorLayoutReply:
+        switch (c)
+        {
+        case CommandReplyOK:
+            // We are talking with firmware that supports receiving sector layout data! Yay!
+            for (int i = 0; i < sectorGroups.count(); i++)
+            {
+                // Send the count of sectors in this group
+                sendWord(sectorGroups[i].first);
+                // Send the size of each sector in this group
+                sendWord(sectorGroups[i].second);
+            }
+            // Send a 0 to terminate the list of sector groups.
+            sendWord(0);
+            // This should cause the programmer to respond back to us with a yea or nay.
+            curState = (curState == WriteSIMMWaitingSetSectorLayoutReply) ?
+                        WriteSIMMWaitingSectorLayoutDataReply : WritePortionWaitingSectorLayoutDataReply;
+            break;
+        case CommandReplyInvalid:
+        case CommandReplyError:
+        default:
+            // If this command fails, just silently ignore the error and move
+            // onto setting the SIMM address unlock pattern instead.
+            uint8_t setLayoutCommand = (SIMMChip() == SIMM_TSOP_x8) ?
+                    SetSIMMLayout_AddressShifted : SetSIMMLayout_AddressStraight;
+            ProgrammerCommandState newState = (curState == WriteSIMMWaitingSetSectorLayoutReply) ?
+                        WriteSIMMWaitingSetSizeReply : WritePortionWaitingSetSizeReply;
+            startProgrammerCommand(setLayoutCommand, newState);
+        }
+        break;
+
+    // Expecting reply after the programmer allowed us to send the sector layout
+    case WriteSIMMWaitingSectorLayoutDataReply:
+    case WritePortionWaitingSectorLayoutDataReply:
+        switch (c)
+        {
+        case CommandReplyOK: {
+            // All good! Now move onto setting the SIMM address unlock pattern
+            uint8_t setLayoutCommand = (SIMMChip() == SIMM_TSOP_x8) ?
+                    SetSIMMLayout_AddressShifted : SetSIMMLayout_AddressStraight;
+            ProgrammerCommandState newState = (curState == WriteSIMMWaitingSectorLayoutDataReply) ?
+                        WriteSIMMWaitingSetSizeReply : WritePortionWaitingSetSizeReply;
+            startProgrammerCommand(setLayoutCommand, newState);
+            break;
+        }
+        case CommandReplyInvalid:
+        case CommandReplyError:
+            // Error after trying to send the sector layout. The firmware clearly supports the command,
+            // so we need to return an error.
+            qDebug() << "Error reply sending erase sector layout.";
+            curState = WaitingForNextCommand;
+            closePort();
+            emit writeStatusChanged(WriteError);
+            break;
+        }
+
         break;
 
     // Expecting reply after we told the programmer the size of SIMM to expect
@@ -1163,13 +1237,30 @@ void Programmer::handleChar(uint8_t c)
             // doesn't support the large SIMM type so the user needs to know.
             if (SIMMChip() != SIMM_PLCC_x8)
             {
-                // Uh oh -- this is an old firmware that doesn't support a big
-                // SIMM. Let the caller know that the programmer board needs a
-                // firmware update.
-                qDebug() << "Programmer board needs firmware update.";
-                curState = WaitingForNextCommand;
-                closePort();
-                emit identificationStatusChanged(IdentificationNeedsFirmwareUpdate);
+                if (!identifyIsForWriteAttempt)
+                {
+                    // Uh oh -- this is an old firmware that doesn't support a big
+                    // SIMM. Let the caller know that the programmer board needs a
+                    // firmware update.
+                    qDebug() << "Programmer board needs firmware update.";
+                    curState = WaitingForNextCommand;
+                    closePort();
+                    emit identificationStatusChanged(IdentificationNeedsFirmwareUpdate);
+                }
+                else
+                {
+                    // Don't inhibit writes if we failed to identify. Just assume an empty/unknown
+                    // sector layout and continue on
+                    sectorGroups.clear();
+                    if (identifyWriteIsEntireSIMM)
+                    {
+                        startProgrammerCommand(SetSectorLayout, WriteSIMMWaitingSetSectorLayoutReply);
+                    }
+                    else
+                    {
+                        startProgrammerCommand(SetSectorLayout, WritePortionWaitingSetSectorLayoutReply);
+                    }
+                }
             }
             else
             {
@@ -1189,32 +1280,42 @@ void Programmer::handleChar(uint8_t c)
         if (c == CommandReplyOK)
         {
             // Good to go, now waiting for identification data
-            emit identificationStatusChanged(IdentificationStarting);
+            if (identificationShiftCounter == 0 && !identifyIsForWriteAttempt)
+            {   // If this is the first identification attempt, emit the signal
+                emit identificationStatusChanged(IdentificationStarting);
+            }
             curState = IdentificationWaitingData;
-            identificationCounter = 0;
+            identificationReadCounter = 0;
         }
         else
         {
             // Error -- close the port, we're done!
             closePort();
-            emit identificationStatusChanged(IdentificationError);
+            if (!identifyIsForWriteAttempt)
+            {
+                emit identificationStatusChanged(IdentificationError);
+            }
+            else
+            {
+                emit writeStatusChanged(WriteError);
+            }
             curState = WaitingForNextCommand;
         }
         break;
 
     // Expecting device/manufacturer info about the chips
     case IdentificationWaitingData:
-        if (identificationCounter & 1) // device ID?
+        if (identificationReadCounter & 1) // device ID?
         {
-            chipDeviceIDs[identificationCounter/2] = c;
+            chipDeviceIDs[identificationShiftCounter][identificationReadCounter/2] = c;
         }
         else // manufacturer ID?
         {
-            chipManufacturerIDs[identificationCounter/2] = c;
+            chipManufacturerIDs[identificationShiftCounter][identificationReadCounter/2] = c;
         }
 
         // All done?
-        if (++identificationCounter >= 8)
+        if (++identificationReadCounter >= 8)
         {
             curState = IdentificationAwaitingDoneReply;
         }
@@ -1222,15 +1323,75 @@ void Programmer::handleChar(uint8_t c)
 
     // Expecting final done confirmation after receiving all device/manufacturer info
     case IdentificationAwaitingDoneReply:
-        curState = WaitingForNextCommand;
-        closePort();
-        if (c == ProgrammerIdentifyDone)
+        if (++identificationShiftCounter >= 2)
         {
-            emit identificationStatusChanged(IdentificationComplete);
+            if (!identifyIsForWriteAttempt)
+            {
+                curState = WaitingForNextCommand;
+                closePort();
+                if (c == ProgrammerIdentifyDone)
+                {
+                    emit identificationStatusChanged(IdentificationComplete);
+                }
+                else
+                {
+                    emit identificationStatusChanged(IdentificationError);
+                }
+            }
+            else
+            {
+                // This was for a write attempt and we got the ID data. Now parse it
+                // to try to figure out the erase sector layout. If we can't find anything,
+                // fall back to empty erase sector info.
+                sectorGroups.clear();
+
+                // We have to convert the ID info into a format that is usable by ChipID
+                QList<uint8_t> manufacturersStraight;
+                QList<uint8_t> devicesStraight;
+                QList<uint8_t> manufacturersShifted;
+                QList<uint8_t> devicesShifted;
+                for (int i = 0; i < 4; i++)
+                {
+                    manufacturersStraight << chipManufacturerIDs[0][i];
+                    devicesStraight << chipDeviceIDs[0][i];
+                    manufacturersShifted << chipManufacturerIDs[1][i];
+                    devicesShifted << chipDeviceIDs[1][i];
+                }
+
+                // Now ask ChipID to tell us what we have
+                QList<ChipID::ChipInfo> chipInfo;
+                if (_chipID.findChips(manufacturersStraight, devicesStraight,
+                                      manufacturersShifted, devicesShifted,
+                                      chipInfo))
+                {
+                    // Use the sector info of the first valid chip we find in the info returned
+                    foreach (ChipID::ChipInfo const &info, chipInfo)
+                    {
+                        if (info.capacity != 0)
+                        {
+                            sectorGroups = info.sectors;
+                            break;
+                        }
+                    }
+                }
+
+                // OK, we have the sector info saved. Now, let's do it!
+                if (identifyWriteIsEntireSIMM)
+                {
+                    startProgrammerCommand(SetSectorLayout, WriteSIMMWaitingSetSectorLayoutReply);
+                }
+                else
+                {
+                    startProgrammerCommand(SetSectorLayout, WritePortionWaitingSetSectorLayoutReply);
+                }
+            }
         }
         else
         {
-            emit identificationStatusChanged(IdentificationError);
+            // Now we need to do the shifted version, so do another whole identification cycle
+            // with the other shift state
+            curState = IdentificationWaitingSetSizeReply;
+            sendByte(SetSIMMLayout_AddressShifted);
         }
         break;
 
@@ -1249,6 +1410,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            delete firmwareFile;
+            firmwareFile = NULL;
             emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
@@ -1260,6 +1423,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            delete firmwareFile;
+            firmwareFile = NULL;
             emit firmwareFlashStatusChanged(FirmwareFlashComplete);
         }
         else
@@ -1267,6 +1432,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            delete firmwareFile;
+            firmwareFile = NULL;
             emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
@@ -1308,6 +1475,8 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            delete firmwareFile;
+            firmwareFile = NULL;
             emit firmwareFlashStatusChanged(FirmwareFlashError);
         }
         break;
@@ -1333,7 +1502,61 @@ void Programmer::handleChar(uint8_t c)
             curState = WaitingForNextCommand;
             closePort();
             firmwareFile->close();
+            delete firmwareFile;
+            firmwareFile = NULL;
             emit firmwareFlashStatusChanged(FirmwareFlashError);
+        }
+        break;
+
+    // READ FIRMWARE VERSION STATE HANDLERS
+
+    // Expecting reply after we asked for the firmware to report its version
+    case ReadFWVersionAwaitingOKReply:
+        if (c == CommandReplyOK)
+        {
+            // We should now be expecting to receive 4 bytes containing the firmware
+            firmwareVersionBeingAssembled = 0;
+            firmwareVersionNextExpectedByte = 0;
+            curState = ReadFWVersionWaitingData;
+        }
+        else if (c == CommandReplyInvalid)
+        {
+            // This is an older firmware not supported
+            curState = WaitingForNextCommand;
+            closePort();
+            emit readFirmwareVersionStatusChanged(ReadFirmwareVersionCommandNotSupported, 0);
+        }
+        else
+        {
+            // Error occurred
+            curState = WaitingForNextCommand;
+            closePort();
+            emit readFirmwareVersionStatusChanged(ReadFirmwareVersionError, 0);
+        }
+        break;
+
+    // Reading the firmware version data
+    case ReadFWVersionWaitingData:
+        firmwareVersionBeingAssembled <<= 8;
+        firmwareVersionBeingAssembled |= c;
+        firmwareVersionNextExpectedByte++;
+        if (firmwareVersionNextExpectedByte >= 4)
+        {
+            curState = ReadFWVersionAwaitingDoneReply;
+        }
+        break;
+
+    // Waiting for the final OK reply
+    case ReadFWVersionAwaitingDoneReply:
+        closePort();
+        curState = WaitingForNextCommand;
+        if (c == ProgrammerGetFWVersionDone)
+        {
+            emit readFirmwareVersionStatusChanged(ReadFirmwareVersionSucceeded, firmwareVersionBeingAssembled);
+        }
+        else
+        {
+            emit readFirmwareVersionStatusChanged(ReadFirmwareVersionError, 0);
         }
         break;
 
@@ -1409,26 +1632,18 @@ QString Programmer::electricalTestPinName(uint8_t index)
 
 void Programmer::identifySIMMChips()
 {
-    //startProgrammerCommand(IdentifyChips, IdentificationAwaitingOKReply);
-    // Based on the SIMM type, tell the programmer board.
-    uint8_t setLayoutCommand;
-    if (SIMMChip() == SIMM_TSOP_x8)
-    {
-        setLayoutCommand = SetSIMMLayout_AddressShifted;
-    }
-    else
-    {
-        setLayoutCommand = SetSIMMLayout_AddressStraight;
-    }
-    startProgrammerCommand(setLayoutCommand, IdentificationWaitingSetSizeReply);
+    // Start with straight addresses
+    identifyIsForWriteAttempt = false;
+    identificationShiftCounter = 0;
+    startProgrammerCommand(SetSIMMLayout_AddressStraight, IdentificationWaitingSetSizeReply);
 }
 
-void Programmer::getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device)
+void Programmer::getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *device, bool shiftedUnlock)
 {
     if ((chipIndex >= 0) && (chipIndex < 4))
     {
-        *manufacturer = chipManufacturerIDs[chipIndex];
-        *device = chipDeviceIDs[chipIndex];
+        *manufacturer = chipManufacturerIDs[shiftedUnlock][chipIndex];
+        *device = chipDeviceIDs[shiftedUnlock][chipIndex];
     }
     else
     {
@@ -1437,9 +1652,15 @@ void Programmer::getChipIdentity(int chipIndex, uint8_t *manufacturer, uint8_t *
     }
 }
 
-void Programmer::flashFirmware(QString filename)
+void Programmer::requestFirmwareVersion()
 {
-    firmwareFile = new QFile(filename);
+    startProgrammerCommand(GetFirmwareVersion, ReadFWVersionAwaitingOKReply);
+}
+
+void Programmer::flashFirmware(QByteArray firmware)
+{
+    firmwareFile = new QBuffer();
+    firmwareFile->setData(firmware);
     if (!firmwareFile->open(QFile::ReadOnly))
     {
         curState = WaitingForNextCommand;
@@ -1502,6 +1723,7 @@ void Programmer::portDiscovered(const QextPortInfo &info)
         programmerBoardPortName = info.portName;
 #endif
         foundState = ProgrammerBoardFound;
+        detectedDeviceRevision = info.revision;
 
         // I create a temporary timer here because opening it immediately seems to crash
         // Mac OS X in my limited testing. Don't worry about a memory leak -- the
@@ -1552,6 +1774,7 @@ void Programmer::portRemoved(const QextPortInfo &info)
     {
         programmerBoardPortName = "";
         foundState = ProgrammerBoardNotFound;
+        detectedDeviceRevision = 0;
 
         // Don't show the "no programmer connected" screen if we intentionally
         // disconnected the USB port because we are changing from bootloader
@@ -1625,6 +1848,16 @@ void Programmer::setVerifyMode(VerificationOption mode)
 VerificationOption Programmer::verifyMode() const
 {
     return _verifyMode;
+}
+
+ProgrammerRevision Programmer::programmerRevision() const
+{
+    return static_cast<ProgrammerRevision>(detectedDeviceRevision);
+}
+
+bool Programmer::selectedSIMMTypeUsesShiftedUnlock() const
+{
+    return SIMMChip() == SIMM_TSOP_x8;
 }
 
 void Programmer::doVerifyAfterWriteCompare()

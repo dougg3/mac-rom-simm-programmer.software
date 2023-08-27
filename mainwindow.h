@@ -22,6 +22,7 @@
 
 #include <QMainWindow>
 #include <QFile>
+#include <QMessageBox>
 #include "programmer.h"
 
 namespace Ui {
@@ -41,6 +42,7 @@ private slots:
     void on_selectReadFileButton_clicked();
 
     void on_writeToSIMMButton_clicked();
+    void doInternalWrite(QIODevice *device);
     void on_readFromSIMMButton_clicked();
 
     void on_chosenWriteFile_textEdited(const QString &newText);
@@ -48,6 +50,7 @@ private slots:
 
     void on_writeGroupBox_fileDropped(const QString &filePath);
     void on_readGroupBox_fileDropped(const QString &filePath);
+    void on_createROMGroupBox_fileDropped(const QString &filePath);
 
     void programmerWriteStatusChanged(WriteStatus newStatus);
     void programmerWriteTotalLengthChanged(uint32_t totalLen);
@@ -69,6 +72,8 @@ private slots:
     void programmerFirmwareFlashTotalLengthChanged(uint32_t totalLen);
     void programmerFirmwareFlashCompletionLengthChanged(uint32_t len);
 
+    void programmerFirmwareVersionStatusChanged(ReadFirmwareVersionStatus status, uint32_t version);
+
     void on_electricalTestButton_clicked();
 
     void on_actionUpdate_firmware_triggered();
@@ -83,10 +88,13 @@ private slots:
     void on_simmCapacityBox_currentIndexChanged(int index);
 
     void on_actionAbout_SIMM_Programmer_triggered();
+    void on_actionCheck_Firmware_Version_triggered();
 
     void on_verifyBox_currentIndexChanged(int index);
+    void on_createVerifyBox_currentIndexChanged(int index);
 
     void on_howMuchToWriteBox_currentIndexChanged(int index);
+    void on_createHowMuchToWriteBox_currentIndexChanged(int index);
 
     void on_flashIndividualEnterButton_clicked();
     void on_returnNormalButton_clicked();
@@ -99,16 +107,47 @@ private slots:
     void on_multiReadChipsButton_clicked();
     void finishMultiRead();
 
+    void on_verifyROMChecksumButton_clicked();
+    void finishChecksumVerify();
+    bool calculateROMChecksum(QByteArray const &rom, uint32_t len, uint32_t &checksum);
+
+    void on_selectBaseROMButton_clicked();
+    void on_selectDiskImageButton_clicked();
+    void on_chosenBaseROMFile_textEdited(const QString &text);
+    void on_chosenDiskImageFile_textEdited(const QString &text);
+    void updateCreateROMControlStatus();
+    void on_writeCombinedFileToSIMMButton_clicked();
+    void on_saveCombinedFileButton_clicked();
+
+    void compressorThreadFinished(QByteArray hashOfOriginal, QByteArray compressedData);
+
+    void messageBoxFinished();
+
+    void on_actionExtended_UI_triggered(bool checked);
+
+    void on_actionCreate_blank_disk_image_triggered();
+
 private:
     Ui::MainWindow *ui;
     bool initializing;
-    bool writeFileValid;
-    bool readFileValid;
-    QFile *writeFile;
+    QIODevice *writeFile;
     QFile *readFile;
     QString electricalTestString;
     QBuffer *writeBuffer;
     QBuffer *readBuffer;
+    QBuffer *checksumVerifyBuffer;
+    QByteArray compressedImageFileHash;
+    QByteArray compressedImage;
+    QMessageBox *activeMessageBox;
+
+    enum KnownBaseROM
+    {
+        BaseROMUnknown,
+        BaseROMbbraun2MB,
+        BaseROMbbraun8MB,
+        BaseROMBMOW,
+        BaseROMGarrettsWorkshop,
+    };
 
     void resetAndShowStatusPage();
     void handleVerifyFailureReply();
@@ -117,6 +156,26 @@ private:
     void showFlashIndividualControls();
 
     void returnToControlPage();
+
+    bool checkBaseROMValidity(QString &errorText);
+    bool checkBaseROMCompressionSupport();
+    KnownBaseROM identifyBaseROM(QByteArray const *baseROMToCheck = NULL);
+    bool checkDiskImageValidity(QString &errorText, bool &alreadyCompressed);
+    bool isCompressedDiskImage(QByteArray const &image);
+    void compressImageInBackground(QByteArray uncompressedImage, bool blockUntilCompletion);
+    QByteArray uncompressedDiskImage();
+    QByteArray diskImageToWrite();
+    QByteArray unpatchedBaseROM();
+    QByteArray patchedBaseROM();
+    QByteArray createROM();
+    QString displayableFileSize(qint64 size);
+
+    static QList<QByteArray> separateFirmwareIntoVersions(QByteArray totalFirmware);
+    QByteArray findCompatibleFirmware(QString filename, QString &compatibilityError);
+    bool firmwareIsCompatible(QByteArray const &firmware, bool &isFirmwareFile);
+
+    void showMessageBox(QMessageBox::Icon icon, const QString &title, const QString &text);
+    void setUseExtendedUI(bool extended);
 };
 
 #endif // MAINWINDOW_H

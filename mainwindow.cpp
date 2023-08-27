@@ -21,10 +21,17 @@
 #include "ui_mainwindow.h"
 #include "programmer.h"
 #include "aboutbox.h"
+#include "fc8compressor.h"
+#include "createblankdiskdialog.h"
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDebug>
 #include <QSettings>
+#include <QBuffer>
+#include <QThread>
+#include <algorithm>
+#include <QLocale>
+#include <QCryptographicHash>
 
 static Programmer *p;
 
@@ -32,6 +39,7 @@ static Programmer *p;
 #define verifyAfterWriteKey     "verifyAfterWrite"
 #define verifyWhileWritingKey   "verifyWhileWriting"
 #define selectedEraseSizeKey    "selectedEraseSize"
+#define extendedViewKey         "extendedView"
 
 struct SIMMDesc {
     uint32_t saveValue;
@@ -47,10 +55,55 @@ SIMMDesc simmTable[] ={
     {3, "1MB (4x 2Mb PLCC)",    1024, SIMM_PLCC_x8 },
     {4, "2MB (4x 4Mb PLCC)",    2048, SIMM_PLCC_x8 },
     {8, "2MB (2x 8Mb TSOP)",    2048, SIMM_TSOP_x16},
+    {9, "4MB (4x 8Mb TSOP)",    4096, SIMM_TSOP_x8 },
     {5, "4MB (2x 16Mb TSOP)",   4096, SIMM_TSOP_x16},
     {6, "8MB (4x 16Mb TSOP)",   8192, SIMM_TSOP_x8 },
     {7, "8MB (2x 32Mb TSOP)",   8192, SIMM_TSOP_x16},
 };
+
+static const struct
+{
+    uint32_t checksum;
+    const char *model;
+} romChecksumsAndModels[] = {
+    {0x28BA61CEUL, "128k or 512k"},
+    {0x28BA4E50UL, "128k or 512k"},
+    {0x4D1EEEE1UL, "Plus"},
+    {0x4D1EEAE1UL, "Plus"},
+    {0x4D1F8172UL, "Plus"},
+    {0xB2E362A8UL, "SE"},
+    {0xB306E171UL, "SE FDHD"},
+    {0x9779D2C4UL, "II"},
+    {0x97851DB6UL, "II"},
+    {0x97221136UL, "IIx, IIcx, or SE/30"},
+    {0x368CADFEUL, "IIci"},
+    {0x36B7FB6CUL, "IIsi"},
+    {0x4147DD77UL, "IIfx"},
+    {0x4957EB49UL, "IIvx or IIvi"},
+    {0x49579803UL, "IIvx or IIvi"},
+    {0xA49F9914UL, "Classic"},
+    {0x3193670EUL, "Classic II"},
+    {0xECD99DC0UL, "Color Classic"},
+    {0xEDE66CBDUL, "Color Classic II, LC 550, or TV"},
+    {0xEAF1678DUL, "Color Classic II, LC 550, or TV"},
+    {0x350EACF0UL, "LC"},
+    {0x35C28F5FUL, "LC II"},
+    {0xEC904829UL, "LC III"},
+    {0xECBBC41CUL, "LC III"},
+    {0x064DC91DUL, "LC 580"},
+    {0xF1A6F343UL, "Quadra/Centris 610, 650, or 800"},
+    {0x420DBFF3UL, "Quadra 700 or 900"},
+    {0x3DC27823UL, "Quadra 950"},
+    {0xFF7439EEUL, "Quadra 605, LC 475, or LC 575"},
+    {0x06684214UL, "Quadra 630"},
+    {0x5BF10FD1UL, "Quadra 660av or 840av"},
+    {0x87D3C814UL, "Quadra 660av or 840av"},
+};
+
+static const QByteArray multiFirmwareDelimiter(
+        "\xDB\x00\xDB\x01\xDB\x02\xDB\x03\xDB\x04\xDB\x05\xDB\x06\xDB\x07"
+        "\xDB\x08\xDB\x09\xDB\x0A\xDB\x0B\xDB\x0C\xDB\x0D\xDB\x0E\xDB\x0F"
+        "\xDB\xDB\xDB\xDB\xAA\xAA\xAA\xAA\xDB\xDB\xDB\xDB\x55\x55\x55\x55", 48);
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -58,7 +111,9 @@ MainWindow::MainWindow(QWidget *parent) :
     writeFile(NULL),
     readFile(NULL),
     writeBuffer(NULL),
-    readBuffer(NULL)
+    readBuffer(NULL),
+    checksumVerifyBuffer(NULL),
+    activeMessageBox(NULL)
 {
     initializing = true;
     // Make default QSettings use these settings
@@ -69,9 +124,23 @@ MainWindow::MainWindow(QWidget *parent) :
 
     p = new Programmer();
     ui->setupUi(this);
+
+    // On Mac and Linux, make it a little wider due to larger font
+#if defined(Q_OS_MACX) || defined(Q_OS_LINUX)
+    resize(width() + 200, height());
+#endif
+
+    if (settings.value(extendedViewKey, false).toBool())
+    {
+        setUseExtendedUI(true);
+        ui->actionExtended_UI->setChecked(true);
+    }
+
     hideFlashIndividualControls();
     ui->pages->setCurrentWidget(ui->notConnectedPage);
+    ui->tabWidget->setCurrentWidget(ui->writeTab);
     ui->actionUpdate_firmware->setEnabled(false);
+    ui->actionCheck_Firmware_Version->setEnabled(false);
 
     // Fill in the list of SIMM chip capacities (programmer can support anywhere up to 8 MB of space)
     for (size_t i = 0; i < sizeof(simmTable)/sizeof(simmTable[0]); i++)
@@ -88,9 +157,15 @@ MainWindow::MainWindow(QWidget *parent) :
     }
 
     // Fill in the list of verification options
-    ui->verifyBox->addItem("Don't verify", QVariant(NoVerification));
-    ui->verifyBox->addItem("Verify while writing", QVariant(VerifyWhileWriting));
-    ui->verifyBox->addItem("Verify after writing", QVariant(VerifyAfterWrite));
+    QList<QComboBox *> verifyBoxes;
+    verifyBoxes << ui->verifyBox;
+    verifyBoxes << ui->createVerifyBox;
+    foreach (QComboBox *verifyBox, verifyBoxes)
+    {
+        verifyBox->addItem("Don't verify", QVariant(NoVerification));
+        verifyBox->addItem("Verify while writing", QVariant(VerifyWhileWriting));
+        verifyBox->addItem("Verify after writing", QVariant(VerifyAfterWrite));
+    }
 
     // Decide whether to verify while writing, after writing, or never.
     // This would probably be better suited as an enum rather than multiple bools,
@@ -114,36 +189,52 @@ MainWindow::MainWindow(QWidget *parent) :
 
     if (selectedIndex != -1)
     {
-        ui->verifyBox->setCurrentIndex(selectedIndex);
+        foreach (QComboBox *verifyBox, verifyBoxes)
+        {
+            verifyBox->setCurrentIndex(selectedIndex);
+        }
     }
 
     // Fill in list of "write first xxx bytes" options
-    ui->howMuchToWriteBox->addItem("Erase/write entire SIMM", QVariant(0));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 256 KB", QVariant(256*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 512 KB", QVariant(512*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 1 MB", QVariant(1024*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 1.5 MB", QVariant(3*512*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 2 MB", QVariant(2*1024*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 4 MB", QVariant(4*1024*1024));
-    ui->howMuchToWriteBox->addItem("Only erase/write first 8 MB", QVariant(8*1024*1024));
+    QList<QComboBox *> howMuchToWriteBoxes;
+    howMuchToWriteBoxes << ui->howMuchToWriteBox;
+    howMuchToWriteBoxes << ui->createHowMuchToWriteBox;
+    foreach (QComboBox *howMuchToWriteBox, howMuchToWriteBoxes)
+    {
+        howMuchToWriteBox->addItem("Erase/write entire SIMM", QVariant(0));
+        howMuchToWriteBox->addItem("Only erase/write first 256 KB", QVariant(256*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 512 KB", QVariant(512*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 1 MB", QVariant(1024*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 1.5 MB", QVariant(3*512*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 2 MB", QVariant(2*1024*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 4 MB", QVariant(4*1024*1024));
+        howMuchToWriteBox->addItem("Only erase/write first 8 MB", QVariant(8*1024*1024));
+    }
 
     // Select "erase entire SIMM" by default, or load last-used setting
     QVariant selectedEraseSize = settings.value(selectedEraseSizeKey, QVariant(0));
     selectedIndex = ui->howMuchToWriteBox->findData(selectedEraseSize);
     if (selectedIndex != -1)
     {
-        ui->howMuchToWriteBox->setCurrentIndex(selectedIndex);
+        foreach (QComboBox *howMuchToWriteBox, howMuchToWriteBoxes)
+        {
+            howMuchToWriteBox->setCurrentIndex(selectedIndex);
+        }
     }
 
     ui->chosenWriteFile->setText("");
     ui->chosenReadFile->setText("");
-    writeFileValid = false;
-    readFileValid = false;
     ui->writeToSIMMButton->setEnabled(false);
     ui->readFromSIMMButton->setEnabled(false);
     ui->progressBar->setValue(0);
     ui->statusLabel->setText("");
     ui->cancelButton->setEnabled(false);
+
+    ui->writeCombinedFileToSIMMButton->setEnabled(false);
+    ui->saveCombinedFileButton->setEnabled(false);
+    ui->createROMErrorText->setText("");
+    // Allow dropping a ROM and disk image simultaneously
+    ui->createROMGroupBox->setMaxFiles(2);
 
     connect(p, SIGNAL(writeStatusChanged(WriteStatus)), SLOT(programmerWriteStatusChanged(WriteStatus)));
     connect(p, SIGNAL(writeTotalLengthChanged(uint32_t)), SLOT(programmerWriteTotalLengthChanged(uint32_t)));
@@ -162,6 +253,7 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(p, SIGNAL(programmerBoardConnected()), SLOT(programmerBoardConnected()));
     connect(p, SIGNAL(programmerBoardDisconnected()), SLOT(programmerBoardDisconnected()));
     connect(p, SIGNAL(programmerBoardDisconnectedDuringOperation()), SLOT(programmerBoardDisconnectedDuringOperation()));
+    connect(p, SIGNAL(readFirmwareVersionStatusChanged(ReadFirmwareVersionStatus,uint32_t)), SLOT(programmerFirmwareVersionStatusChanged(ReadFirmwareVersionStatus,uint32_t)));
     p->startCheckingPorts();
 
     // Set up the multi chip flasher UI -- connect signals
@@ -209,7 +301,6 @@ void MainWindow::on_selectWriteFileButton_clicked()
     QString filename = QFileDialog::getOpenFileName(this, "Select a ROM image:");
     if (!filename.isNull())
     {
-        writeFileValid = true;
         ui->chosenWriteFile->setText(filename);
         ui->writeToSIMMButton->setEnabled(true);
     }
@@ -220,7 +311,6 @@ void MainWindow::on_selectReadFileButton_clicked()
     QString filename = QFileDialog::getSaveFileName(this, "Save ROM image as:");
     if (!filename.isNull())
     {
-        readFileValid = true;
         ui->chosenReadFile->setText(filename);
         ui->readFromSIMMButton->setEnabled(true);
     }
@@ -239,6 +329,11 @@ void MainWindow::on_readFromSIMMButton_clicked()
     {
         delete readBuffer;
         readBuffer = NULL;
+    }
+    if (checksumVerifyBuffer)
+    {
+        delete checksumVerifyBuffer;
+        checksumVerifyBuffer = NULL;
     }
     if (readFile)
     {
@@ -267,6 +362,11 @@ void MainWindow::on_readFromSIMMButton_clicked()
 
 void MainWindow::on_writeToSIMMButton_clicked()
 {
+    doInternalWrite(new QFile(ui->chosenWriteFile->text()));
+}
+
+void MainWindow::doInternalWrite(QIODevice *device)
+{
     // Ensure we don't think we're in buffer writing/reading mode...we're writing
     // an actual file.
     if (writeBuffer)
@@ -279,12 +379,17 @@ void MainWindow::on_writeToSIMMButton_clicked()
         delete readBuffer;
         readBuffer = NULL;
     }
+    if (checksumVerifyBuffer)
+    {
+        delete checksumVerifyBuffer;
+        checksumVerifyBuffer = NULL;
+    }
     if (writeFile)
     {
         writeFile->close();
         delete writeFile;
     }
-    writeFile = new QFile(ui->chosenWriteFile->text());
+    writeFile = device;
     if (writeFile)
     {
         if (!writeFile->open(QFile::ReadOnly))
@@ -319,12 +424,10 @@ void MainWindow::on_chosenWriteFile_textEdited(const QString &newText)
     if (!newText.isEmpty() && fi.exists() && fi.isFile())
     {
         ui->writeToSIMMButton->setEnabled(true);
-        writeFileValid = true;
     }
     else
     {
         ui->writeToSIMMButton->setEnabled(false);
-        writeFileValid = false;
     }
 }
 
@@ -334,12 +437,10 @@ void MainWindow::on_chosenReadFile_textEdited(const QString &newText)
     if (!newText.isEmpty() && fi.dir().exists())
     {
         ui->readFromSIMMButton->setEnabled(true);
-        readFileValid = true;
     }
     else
     {
         ui->readFromSIMMButton->setEnabled(false);
-        readFileValid = false;
     }
 }
 
@@ -353,6 +454,43 @@ void MainWindow::on_readGroupBox_fileDropped(const QString &filePath)
 {
     ui->chosenReadFile->setText(filePath);
     on_chosenReadFile_textEdited(filePath);
+}
+
+void MainWindow::on_createROMGroupBox_fileDropped(const QString &filePath)
+{
+    // It could be a base ROM or a disk image.
+    QFile droppedFile(filePath);
+    if (!droppedFile.open(QFile::ReadOnly))
+    {
+        return;
+    }
+
+    // Let's see what type of file it is.
+    QByteArray data = droppedFile.read(0x1708);
+    droppedFile.close();
+
+    if (data.length() != 0x1708)
+    {
+        // It's too short to be anything! Bail!
+        return;
+    }
+
+    // Is it a ROM? Do a very simplified check similar to checkBaseROMValidity()
+    if ((data.at(0x1706) == 0x4E && data.at(0x1707) == 0x75) ||
+        (data.at(0x1706) == 0x67))
+    {
+        ui->chosenBaseROMFile->setText(filePath);
+        on_chosenBaseROMFile_textEdited(filePath);
+    }
+    // Not a ROM; it might be a disk image. Look for compressed disk image header
+    // or HFS to get an idea about what's going on.
+    else if (data.startsWith(QByteArray("FC8", 3)) ||
+             (data.at(1024) == 'B' && data.at(1025) == 'D'))
+    {
+        ui->chosenDiskImageFile->setText(filePath);
+        on_chosenDiskImageFile_textEdited(filePath);
+    }
+    // Let's just silently ignore the dropped if it's not one of these.
 }
 
 void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
@@ -377,9 +515,8 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
             writeFile = NULL;
         }
 
-        QMessageBox::information(this, "Write complete", "The write operation finished.");
-
         returnToControlPage();
+        showMessageBox(QMessageBox::Information, "Write complete", "The write operation finished.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -395,9 +532,8 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
             writeFile = NULL;
         }
 
-        QMessageBox::information(this, "Write complete", "The write operation finished, and the contents were verified successfully.");
-
         returnToControlPage();
+        showMessageBox(QMessageBox::Information, "Write complete", "The write operation finished, and the contents were verified successfully.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -420,7 +556,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Verify error", "An error occurred reading the SIMM contents for verification.");
+        showMessageBox(QMessageBox::Warning, "Verify error", "An error occurred reading the SIMM contents for verification.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -437,7 +573,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Verify cancelled", "The verify operation was cancelled.");
+        showMessageBox(QMessageBox::Warning, "Verify cancelled", "The verify operation was cancelled.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -454,7 +590,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Verify timed out", "The verify operation timed out.");
+        showMessageBox(QMessageBox::Warning, "Verify timed out", "The verify operation timed out.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -489,7 +625,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Write error", "An error occurred writing to the SIMM.");
+        showMessageBox(QMessageBox::Warning, "Write error", "An error occurred writing to the SIMM.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -506,7 +642,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
+        showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -523,7 +659,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support the \"verify while writing\" capability. Please update the firmware and try again.");
+        showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support the \"verify while writing\" capability. Please update the firmware and try again.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -540,7 +676,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support the \"erase only a portion of the SIMM\" capability. Please update the firmware and try again.");
+        showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support the \"erase only a portion of the SIMM\" capability. Please update the firmware and try again.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -557,7 +693,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support the \"program individual chips\" capability. Please update the firmware and try again.");
+        showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support the \"program individual chips\" capability. Please update the firmware and try again.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -574,7 +710,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Write cancelled", "The write operation was cancelled.");
+        showMessageBox(QMessageBox::Warning, "Write cancelled", "The write operation was cancelled.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -594,7 +730,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Write error", "An error occurred erasing the SIMM.");
+        showMessageBox(QMessageBox::Warning, "Write error", "An error occurred erasing the SIMM.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -611,7 +747,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Write timed out", "The write operation timed out.");
+        showMessageBox(QMessageBox::Warning, "Write timed out", "The write operation timed out.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -628,7 +764,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "File too big", "The file you chose to write to the SIMM is too big according to the chip size you have selected.");
+        showMessageBox(QMessageBox::Warning, "File too big", "The file you chose to write to the SIMM is too big according to the chip size you have selected.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -645,7 +781,7 @@ void MainWindow::programmerWriteStatusChanged(WriteStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Bad erase size", "The programmer cannot handle the erase size you chose.");
+        showMessageBox(QMessageBox::Warning, "Bad erase size", "The programmer cannot handle the erase size you chose.");
         if (writeBuffer)
         {
             writeBuffer->close();
@@ -692,20 +828,20 @@ void MainWindow::programmerElectricalTestStatusChanged(ElectricalTestStatus newS
         qDebug() << "Electrical test started";
         break;
     case ElectricalTestPassed:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::information(this, "Test passed", "The electrical test passed successfully.");
+        returnToControlPage();
+        showMessageBox(QMessageBox::Information, "Test passed", "The electrical test passed successfully.");
         break;
     case ElectricalTestFailed:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Test failed", "The electrical test failed:\n\n" + electricalTestString);
+        returnToControlPage();
+        showMessageBox(QMessageBox::Warning, "Test failed", "The electrical test failed:\n\n" + electricalTestString);
         break;
     case ElectricalTestTimedOut:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Test timed out", "The electrical test operation timed out.");
+        returnToControlPage();
+        showMessageBox(QMessageBox::Warning, "Test timed out", "The electrical test operation timed out.");
         break;
     case ElectricalTestCouldntStart:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Communication error", "Unable to communicate with programmer board.");
+        returnToControlPage();
+        showMessageBox(QMessageBox::Warning, "Communication error", "Unable to communicate with programmer board.");
         break;
     }
 }
@@ -743,11 +879,26 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::information(this, "Read complete", "The read operation finished.");
+
+        // Do the checksum verify finish *after* returning to the control page.
+        if (checksumVerifyBuffer)
+        {
+            finishChecksumVerify();
+        }
+        else
+        {
+            // Normal reads just show a message box
+            showMessageBox(QMessageBox::Information, "Read complete", "The read operation finished.");
+        }
         if (readBuffer)
         {
             delete readBuffer;
             readBuffer = NULL;
+        }
+        if (checksumVerifyBuffer)
+        {
+            delete checksumVerifyBuffer;
+            checksumVerifyBuffer = NULL;
         }
         break;
     case ReadError:
@@ -759,11 +910,16 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Read error", "An error occurred reading from the SIMM.");
+        showMessageBox(QMessageBox::Warning, "Read error", "An error occurred reading from the SIMM.");
         if (readBuffer)
         {
             delete readBuffer;
             readBuffer = NULL;
+        }
+        if (checksumVerifyBuffer)
+        {
+            delete checksumVerifyBuffer;
+            checksumVerifyBuffer = NULL;
         }
         break;
     case ReadCancelled:
@@ -775,11 +931,16 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Read cancelled", "The read operation was cancelled.");
+        showMessageBox(QMessageBox::Warning, "Read cancelled", "The read operation was cancelled.");
         if (readBuffer)
         {
             delete readBuffer;
             readBuffer = NULL;
+        }
+        if (checksumVerifyBuffer)
+        {
+            delete checksumVerifyBuffer;
+            checksumVerifyBuffer = NULL;
         }
         break;
     case ReadTimedOut:
@@ -791,11 +952,16 @@ void MainWindow::programmerReadStatusChanged(ReadStatus newStatus)
         }
 
         returnToControlPage();
-        QMessageBox::warning(this, "Read timed out", "The read operation timed out.");
+        showMessageBox(QMessageBox::Warning, "Read timed out", "The read operation timed out.");
         if (readBuffer)
         {
             delete readBuffer;
             readBuffer = NULL;
+        }
+        if (checksumVerifyBuffer)
+        {
+            delete checksumVerifyBuffer;
+            checksumVerifyBuffer = NULL;
         }
         break;
     }
@@ -820,54 +986,228 @@ void MainWindow::programmerIdentifyStatusChanged(IdentificationStatus newStatus)
         break;
     case IdentificationComplete:
     {
-        ui->pages->setCurrentWidget(ui->controlPage);
+        returnToControlPage();
         QString identifyString = "The chips identified themselves as:";
 
-        // Check the number of chips
-        if (p->SIMMChip() == SIMM_TSOP_x16)
+        // Get the straight and shifted unlock results from the identification command
+        QList<uint8_t> manufacturersStraight;
+        QList<uint8_t> devicesStraight;
+        QList<uint8_t> manufacturersShifted;
+        QList<uint8_t> devicesShifted;
+        for (int i = 0; i < 4; i++)
         {
-            for (int x = 0; x < 2; x++)
+            uint8_t m, d;
+            p->getChipIdentity(i, &m, &d, false);
+            manufacturersStraight << m;
+            devicesStraight << d;
+            p->getChipIdentity(i, &m, &d, true);
+            manufacturersShifted << m;
+            devicesShifted << d;
+        }
+
+        // Pass it all to ChipID to see what it finds
+        QList<ChipID::ChipInfo> chipInfo;
+        if (p->chipID().findChips(manufacturersStraight, devicesStraight, manufacturersShifted, devicesShifted, chipInfo) && !chipInfo.isEmpty())
+        {
+            // It found something! Now, try to make some sense of the results.
+            QSet<uint32_t> capacities;
+            int chipNumber = 1;
+
+            // If we get here, update the message to say how many chips we found
+            identifyString = QString("The %1 chips identified themselves as:").arg(chipInfo.count());
+
+            foreach (ChipID::ChipInfo const &ci, chipInfo)
             {
                 QString thisString;
-                uint8_t manufacturer0 = 0, manufacturer1 = 0;
-                uint8_t device0 = 0, device1 = 0;
-                p->getChipIdentity(x*2, &manufacturer0, &device0);
-                p->getChipIdentity(x*2+1, &manufacturer1, &device1);
-                thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
-                        .arg(QString::number((static_cast<uint16_t>(manufacturer1) << 8) | manufacturer0, 16).toUpper(), 4, QChar('0'))
-                        .arg(QString::number((static_cast<uint16_t>(device1) << 8) | device0, 16).toUpper(), 4, QChar('0'));
+                         thisString = QString("\nIC%1: %2 %3 [0x%4, 0x%5]").arg(chipNumber++)
+                        .arg(ci.manufacturer)
+                        .arg(ci.product)
+                        .arg(QString::number(ci.manufacturerID, 16).toUpper(), 2, QChar('0'))
+                        .arg(QString::number(ci.productID, 16).toUpper(), 2, QChar('0'));
                 identifyString.append(thisString);
+
+                capacities << ci.capacity;
+            }
+
+            uint32_t capacityToDisplay = 0;
+
+            // Check for problems in the returned data. Like maybe only one of the chips has a shorted data pin.
+            if (capacities.count() > 1 || capacities.contains(0))
+            {
+                if (capacities.contains(0))
+                {
+                    identifyString.append("\n\nThere seems to be something wrong with one or more of the chips on this SIMM.");
+                }
+                else
+                {
+                    identifyString.append("\n\nThere seems to be a mismatch of chip types on this SIMM.");
+                }
+                capacities.remove(0);
+                QList<uint32_t> allValues = capacities.values();
+                // Sort the list so that the lowest capacity is the one we display. If there is a mismatch,
+                // the mismatch message will have been printed above
+                std::sort(allValues.begin(), allValues.end());
+                if (allValues.count() > 0)
+                {
+                    capacityToDisplay = allValues[0] * chipInfo.count();
+                }
+            }
+            else
+            {
+                // If we get here, the chips are all the same capacity and all recognized.
+                capacityToDisplay = capacities.values().at(0) * chipInfo.count();
+            }
+
+            if (capacityToDisplay != 0)
+            {
+                identifyString.append(QString("\n\nTotal Capacity = %1").arg(displayableFileSize(capacityToDisplay)));
+            }
+
+            // Find the first chip matching the capacity we determined earlier
+            foreach (ChipID::ChipInfo const &ci, chipInfo)
+            {
+                if (ci.capacity > 0 && ci.capacity == capacityToDisplay / chipInfo.count())
+                {
+                    // We found one. Let's figure out what item we should choose in the list.
+                    const uint32_t chipCapacityBits = ci.capacity * 8;
+                    const bool tsop = ci.width == 16 || ci.unlockShifted;
+                    const int chipCount = chipInfo.count();
+                    QString displayChipCapacity;
+                    if (chipCapacityBits >= 1048576)
+                    {
+                        displayChipCapacity = QString("%1Mb").arg(chipCapacityBits / 1048576);
+                    }
+                    else if (chipCapacityBits >= 1024)
+                    {
+                        displayChipCapacity = QString("%1Kb").arg(chipCapacityBits / 1024);
+                    }
+                    else
+                    {
+                        displayChipCapacity = "Unknown";
+                    }
+                    QString chipConfigDetail;
+                    chipConfigDetail = QString("(%1x %2 %3)").arg(chipCount).arg(displayChipCapacity).arg(tsop ? "TSOP" : "PLCC");
+                    identifyString.append(" ");
+                    identifyString.append(chipConfigDetail);
+
+                    // Special cases: select the 8 MB option for SIMMs larger than 8 MB. The programmer only has enough address
+                    // lines to access 8 MB of data at a time, but there are SIMMs out there that are larger.
+                    if (chipCount == 4 && chipCapacityBits > 16*1048576)
+                    {
+                        chipConfigDetail = "(4x 16Mb TSOP)";
+                    }
+                    else if (chipCount == 2 && chipCapacityBits > 32*1048576)
+                    {
+                        chipConfigDetail = "(2x 32Mb TSOP)";
+                    }
+
+                    // Find a matching item in the dropdown
+                    bool foundMatch = false;
+                    for (size_t i = 0; i < sizeof(simmTable)/sizeof(simmTable[0]); i++)
+                    {
+                        QString displayName(simmTable[i].text);
+                        if (displayName.contains(chipConfigDetail))
+                        {
+                            foundMatch = true;
+                            ui->simmCapacityBox->setCurrentIndex(i);
+                            break;
+                        }
+                    }
+
+                    // If we don't find a match, add a note to the bottom of the chip ID
+                    if (!foundMatch)
+                    {
+                        identifyString.append("\n\nThis chip combination is not currently supported, but you can try selecting a similar combination with a different capacity.");
+                    }
+
+                    break;
+                }
             }
         }
         else
         {
-            for (int x = 0; x < 4; x++)
+            // If we failed to identify the chips, then there might be a problem with the programmable ROM SIMM,
+            // or maybe it's not a programmable SIMM, in which case we have just read back the first 12 bytes
+            // of the SIMM (first 4 bytes = manufacturers straight, next 4 bytes = devices straight/manufacturers shifted,
+            // next 4 bytes = devices shifted). See if it has a standard Mac ROM checksum. It might be a stock ROM SIMM.
+            QString macModel;
+
+            // Quick sanity check: the shifted identification addresses are offset by 1 byte.
+            // So if the straight device response is the same as the shifted manufacturer response,
+            // it likely means we aren't unlocking any flash chips. It may very well be a mask ROM.
+            if (devicesStraight == manufacturersShifted)
             {
-                QString thisString;
-                uint8_t manufacturer = 0;
-                uint8_t device = 0;
-                p->getChipIdentity(x, &manufacturer, &device);
-                thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
-                        .arg(QString::number(manufacturer, 16).toUpper(), 2, QChar('0'))
-                        .arg(QString::number(device, 16).toUpper(), 2, QChar('0'));
-                identifyString.append(thisString);
+                uint32_t possibleRomChecksum = manufacturersStraight[0] |
+                        (static_cast<uint32_t>(manufacturersStraight[1]) << 8) |
+                        (static_cast<uint32_t>(manufacturersStraight[2]) << 16) |
+                        (static_cast<uint32_t>(manufacturersStraight[3]) << 24);
+
+                // See if we find a matching standard Mac ROM checksum in our internal database
+                for (size_t i = 0; i < sizeof(romChecksumsAndModels) / sizeof(romChecksumsAndModels[0]); i++)
+                {
+                    if (romChecksumsAndModels[i].checksum == possibleRomChecksum)
+                    {
+                        macModel = romChecksumsAndModels[i].model;
+                        break;
+                    }
+                }
+            }
+
+            if (!macModel.isEmpty())
+            {
+                identifyString = QString("This appears to be a standard Macintosh %1 ROM SIMM according to its checksum.").arg(macModel);
+                identifyString += "\n\nIt is likely composed of mask ROMs and not programmable. If this is a programmable SIMM, there might be a problem with it.";
+            }
+            else
+            {
+                // If we STILL failed to identify anything, fall back to the old method where we just dump the raw data
+                // based on the current selected chip type
+                if (p->SIMMChip() == SIMM_TSOP_x16)
+                {
+                    for (int x = 0; x < 2; x++)
+                    {
+                        QString thisString;
+                        uint8_t manufacturer0 = 0, manufacturer1 = 0;
+                        uint8_t device0 = 0, device1 = 0;
+                        p->getChipIdentity(x*2, &manufacturer0, &device0, p->selectedSIMMTypeUsesShiftedUnlock());
+                        p->getChipIdentity(x*2+1, &manufacturer1, &device1, p->selectedSIMMTypeUsesShiftedUnlock());
+                        thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
+                                .arg(QString::number((static_cast<uint16_t>(manufacturer1) << 8) | manufacturer0, 16).toUpper(), 4, QChar('0'))
+                                .arg(QString::number((static_cast<uint16_t>(device1) << 8) | device0, 16).toUpper(), 4, QChar('0'));
+                        identifyString.append(thisString);
+                    }
+                }
+                else
+                {
+                    for (int x = 0; x < 4; x++)
+                    {
+                        QString thisString;
+                        uint8_t manufacturer = 0;
+                        uint8_t device = 0;
+                        p->getChipIdentity(x, &manufacturer, &device, p->selectedSIMMTypeUsesShiftedUnlock());
+                        thisString = QString("\nIC%1: Manufacturer 0x%2, Device 0x%3").arg(x + 1)
+                                .arg(QString::number(manufacturer, 16).toUpper(), 2, QChar('0'))
+                                .arg(QString::number(device, 16).toUpper(), 2, QChar('0'));
+                        identifyString.append(thisString);
+                    }
+                }
             }
         }
 
-        QMessageBox::information(this, "Identification complete", identifyString);
+        showMessageBox(QMessageBox::Information, "Identification complete", identifyString);
         break;
     }
     case IdentificationError:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Identification error", "An error occurred identifying the chips on the SIMM.");
+        returnToControlPage();
+        showMessageBox(QMessageBox::Warning, "Identification error", "An error occurred identifying the chips on the SIMM.");
         break;
     case IdentificationTimedOut:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Identification timed out", "The identification operation timed out.");
+        returnToControlPage();
+        showMessageBox(QMessageBox::Warning, "Identification timed out", "The identification operation timed out.");
         break;
     case IdentificationNeedsFirmwareUpdate:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
+        returnToControlPage();
+        showMessageBox(QMessageBox::Warning, "Firmware update needed", "The programmer board needs a firmware update to support a larger SIMM. Please update the firmware and try again.");
         break;
     }
 }
@@ -880,20 +1220,20 @@ void MainWindow::programmerFirmwareFlashStatusChanged(FirmwareFlashStatus newSta
         ui->statusLabel->setText("Flashing new firmware...");
         break;
     case FirmwareFlashComplete:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::information(this, "Firmware update complete", "The firmware update operation finished.");
+        returnToControlPage();
+        showMessageBox(QMessageBox::Information, "Firmware update complete", "The firmware update operation finished.");
         break;
     case FirmwareFlashError:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Firmware update error", "An error occurred writing firmware to the device.");
+        returnToControlPage();
+        showMessageBox(QMessageBox::Warning, "Firmware update error", "An error occurred writing firmware to the device.");
         break;
     case FirmwareFlashCancelled:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Firmware update cancelled", "The firmware update was cancelled.");
+        returnToControlPage();
+        showMessageBox(QMessageBox::Warning, "Firmware update cancelled", "The firmware update was cancelled.");
         break;
     case FirmwareFlashTimedOut:
-        ui->pages->setCurrentWidget(ui->controlPage);
-        QMessageBox::warning(this, "Firmware update timed out", "The firmware update operation timed out.");
+        returnToControlPage();
+        showMessageBox(QMessageBox::Warning, "Firmware update timed out", "The firmware update operation timed out.");
         break;
     }
 }
@@ -908,15 +1248,27 @@ void MainWindow::programmerFirmwareFlashCompletionLengthChanged(uint32_t len)
     ui->progressBar->setValue((int)len);
 }
 
-
 void MainWindow::on_actionUpdate_firmware_triggered()
 {
     QString filename = QFileDialog::getOpenFileName(this, "Select a firmware image:");
     if (!filename.isNull())
     {
-        resetAndShowStatusPage();
-        p->flashFirmware(filename);
-        qDebug() << "Updating firmware...";
+        QString compatibilityError;
+        QByteArray firmware = findCompatibleFirmware(filename, compatibilityError);
+        if (!firmware.isEmpty())
+        {
+            resetAndShowStatusPage();
+            p->flashFirmware(firmware);
+            qDebug() << "Updating firmware...";
+        }
+        else
+        {
+            if (compatibilityError.isEmpty())
+            {
+                compatibilityError = "Unknown error. Check to make sure you have the correct firmware file.";
+            }
+            showMessageBox(QMessageBox::Warning, "Invalid firmware file", compatibilityError);
+        }
     }
 }
 
@@ -930,18 +1282,27 @@ void MainWindow::programmerBoardConnected()
 {
     returnToControlPage();
     ui->actionUpdate_firmware->setEnabled(true);
+    ui->actionCheck_Firmware_Version->setEnabled(true);
 }
 
 void MainWindow::programmerBoardDisconnected()
 {
+    // If a message box currently visible, dismiss it
+    if (activeMessageBox)
+    {
+        activeMessageBox->close();
+        messageBoxFinished();
+    }
     ui->pages->setCurrentWidget(ui->notConnectedPage);
     ui->actionUpdate_firmware->setEnabled(false);
+    ui->actionCheck_Firmware_Version->setEnabled(false);
 }
 
 void MainWindow::programmerBoardDisconnectedDuringOperation()
 {
     ui->pages->setCurrentWidget(ui->notConnectedPage);
     ui->actionUpdate_firmware->setEnabled(false);
+    ui->actionCheck_Firmware_Version->setEnabled(false);
     // Make sure any files have been closed if we were in the middle of something.
     if (writeFile)
     {
@@ -955,7 +1316,7 @@ void MainWindow::programmerBoardDisconnectedDuringOperation()
         delete readFile;
         readFile = NULL;
     }
-    QMessageBox::warning(this, "Programmer lost connection", "Lost contact with the programmer board. Unplug it, plug it back in, and try again.");
+    showMessageBox(QMessageBox::Warning, "Programmer lost connection", "Lost contact with the programmer board. Unplug it, plug it back in, and try again.");
 }
 
 void MainWindow::resetAndShowStatusPage()
@@ -964,6 +1325,8 @@ void MainWindow::resetAndShowStatusPage()
     ui->progressBar->setRange(0, 0);
     ui->statusLabel->setText("Communicating with programmer (this may take a few seconds)...");
     ui->pages->setCurrentWidget(ui->statusPage);
+    ui->actionUpdate_firmware->setEnabled(false);
+    ui->actionCheck_Firmware_Version->setEnabled(false);
 }
 
 void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
@@ -976,6 +1339,9 @@ void MainWindow::on_simmCapacityBox_currentIndexChanged(int index)
         // go ahead and save this as the new default.
         uint32_t saveValue = static_cast<uint32_t>(ui->simmCapacityBox->itemData(index).toUInt());
         settings.setValue(selectedCapacityKey, saveValue);
+
+        // This can affect the error status of the ROM creation section
+        updateCreateROMControlStatus();
     }
 }
 
@@ -1007,6 +1373,21 @@ void MainWindow::on_verifyBox_currentIndexChanged(int index)
             settings.setValue(verifyAfterWriteKey, false);
             settings.setValue(verifyWhileWritingKey, true);
         }
+
+        // Update the other combo box without allowing it to emit a signal
+        ui->createVerifyBox->blockSignals(true);
+        ui->createVerifyBox->setCurrentIndex(index);
+        ui->createVerifyBox->blockSignals(false);
+    }
+}
+
+void MainWindow::on_createVerifyBox_currentIndexChanged(int index)
+{
+    // Update the index on the main control, which will actually apply
+    // the change to the setting.
+    if (!initializing)
+    {
+        ui->verifyBox->setCurrentIndex(index);
     }
 }
 
@@ -1022,6 +1403,21 @@ void MainWindow::on_howMuchToWriteBox_currentIndexChanged(int index)
         // If we're not initializing (it gets called while we're initializing),
         // go ahead and save this as the new default.
         settings.setValue(selectedEraseSizeKey, newEraseSize);
+
+        // Update the other combo box without allowing it to emit a signal
+        ui->createHowMuchToWriteBox->blockSignals(true);
+        ui->createHowMuchToWriteBox->setCurrentIndex(index);
+        ui->createHowMuchToWriteBox->blockSignals(false);
+    }
+}
+
+void MainWindow::on_createHowMuchToWriteBox_currentIndexChanged(int index)
+{
+    // Update the index on the main control, which will actually apply
+    // the change to the setting.
+    if (!initializing)
+    {
+        ui->howMuchToWriteBox->setCurrentIndex(index);
     }
 }
 
@@ -1055,7 +1451,7 @@ void MainWindow::handleVerifyFailureReply()
     }
 
     returnToControlPage();
-    QMessageBox::warning(this, "Verify error", "The data read back from the SIMM did not match the data written to it. Bad data on chips: " + icList);
+    showMessageBox(QMessageBox::Warning, "Verify error", "The data read back from the SIMM did not match the data written to it. Bad data on chips: " + icList);
 }
 
 void MainWindow::on_flashIndividualEnterButton_clicked()
@@ -1068,7 +1464,7 @@ void MainWindow::on_flashIndividualEnterButton_clicked()
 void MainWindow::on_returnNormalButton_clicked()
 {
     hideFlashIndividualControls(); // to allow the window to be shrunk when not active
-    ui->pages->setCurrentWidget(ui->controlPage);
+    returnToControlPage();
 }
 
 void MainWindow::hideFlashIndividualControls()
@@ -1395,6 +1791,11 @@ void MainWindow::on_multiReadChipsButton_clicked()
         delete readBuffer;
     }
     readBuffer = new QBuffer();
+    if (checksumVerifyBuffer)
+    {
+        delete checksumVerifyBuffer;
+        checksumVerifyBuffer = NULL;
+    }
 
     // Try to open each file to make sure it's writable first. Then close it.
     bool hadError = false;
@@ -1506,6 +1907,184 @@ void MainWindow::finishMultiRead()
     }
 }
 
+void MainWindow::on_verifyROMChecksumButton_clicked()
+{
+    // Make sure we're in checksum verify mode
+    if (writeBuffer)
+    {
+        delete writeBuffer;
+        writeBuffer = NULL;
+    }
+    if (readBuffer)
+    {
+        delete readBuffer;
+        readBuffer = NULL;
+    }
+    if (readFile)
+    {
+        readFile->close();
+        delete readFile;
+        readFile = NULL;
+    }
+
+    // Set up the checksum verification buffer
+    if (checksumVerifyBuffer)
+    {
+        delete checksumVerifyBuffer;
+    }
+    checksumVerifyBuffer = new QBuffer();
+
+    // Open up the buffer to read into
+    checksumVerifyBuffer->open(QFile::ReadWrite);
+
+    // Now start reading it!
+    resetAndShowStatusPage();
+    p->readSIMM(checksumVerifyBuffer);
+}
+
+void MainWindow::finishChecksumVerify()
+{
+    QByteArray const &bufferBytes = checksumVerifyBuffer->buffer();
+
+    if (bufferBytes.length() < 0x44)
+    {
+        showMessageBox(QMessageBox::Warning, "Checksum verify error", "The programmer was unable to read enough data to verify the checksum.");
+        return;
+    }
+
+    // Pull out the checksum
+    uint32_t checksumInROM = 0;
+    checksumInROM |= static_cast<uint8_t>(bufferBytes.at(0x0)) << 24;
+    checksumInROM |= static_cast<uint8_t>(bufferBytes.at(0x1)) << 16;
+    checksumInROM |= static_cast<uint8_t>(bufferBytes.at(0x2)) << 8;
+    checksumInROM |= static_cast<uint8_t>(bufferBytes.at(0x3)) << 0;
+
+    // Pull out the length
+    uint32_t romLength = 0;
+    romLength |= static_cast<uint8_t>(bufferBytes.at(0x40)) << 24;
+    romLength |= static_cast<uint8_t>(bufferBytes.at(0x41)) << 16;
+    romLength |= static_cast<uint8_t>(bufferBytes.at(0x42)) << 8;
+    romLength |= static_cast<uint8_t>(bufferBytes.at(0x43)) << 0;
+
+    uint8_t romVersion = static_cast<uint8_t>(bufferBytes.at(0x09));
+
+    // ROM versions up to 0x78 don't have the ROM length embedded.
+    // It's unclear whether ROM 0x79 has the ROM length embedded or not.
+    if (romVersion < 0x7A)
+    {
+        romLength = 0;
+
+        // Check the checksum based on a few random possible checksum lengths
+        // in order to determine the ROM length
+        uint32_t tmpChecksum;
+        for (uint32_t tmpLen = 64*1024; tmpLen <= 512*1024; tmpLen *= 2)
+        {
+            if (calculateROMChecksum(bufferBytes, tmpLen, tmpChecksum) && (tmpChecksum == checksumInROM))
+            {
+                romLength = tmpLen;
+                break;
+            }
+        }
+
+        if (romLength == 0)
+        {
+            showMessageBox(QMessageBox::Warning, "Checksum verify error",
+                           "This appears to be an older Mac ROM (before version 7A) or invalid data that isn't actually a Mac ROM. The checksum doesn't match.");
+            return;
+        }
+    }
+
+    if (romLength > 4 * 1048576 || romLength % (64*1024))
+    {
+        showMessageBox(QMessageBox::Warning, "Checksum verify error",
+                       QString("This appears to not be a valid Mac ROM. The ROM header says it is %1 in size. It may be damaged, or not a Mac ROM at all.")
+                       .arg(displayableFileSize(romLength)));
+        return;
+    }
+    else if (static_cast<uint32_t>(bufferBytes.length()) < romLength)
+    {
+        showMessageBox(QMessageBox::Warning, "Checksum verify error",
+                       QString("According to the ROM header, this is a %1 ROM. Make sure you are reading at least that much data in order to verify the checksum.")
+                        .arg(displayableFileSize(romLength)));
+        return;
+    }
+
+    uint32_t actualChecksum = 0;
+    if (calculateROMChecksum(bufferBytes, romLength, actualChecksum) && (actualChecksum == checksumInROM))
+    {
+        QString checksumInROMString = QString("%1").arg(checksumInROM, 8, 16, QChar('0')).toUpper();
+        QString finalMessage = QString("The checksum of this ROM image comes out correct. The checksum is %1.\n\n")
+                .arg(checksumInROMString);
+
+        // Customize the message based on old or new ROM
+        if (romVersion < 0x7A)
+        {
+            QString romVersionString = QString("%1").arg(romVersion, 2, 16, QChar('0')).toUpper();
+            finalMessage += QString("This is an older ROM (version %1) and the length was deduced to be %2.")
+                    .arg(romVersionString)
+                    .arg(displayableFileSize(romLength));
+        }
+        else
+        {
+            finalMessage += QString("According to the ROM header, it is a %1 ROM.").arg(displayableFileSize(romLength));
+        }
+
+        // Go ahead and identify it by checksum, if we can.
+        for (size_t i = 0; i < sizeof(romChecksumsAndModels) / sizeof(romChecksumsAndModels[0]); i++)
+        {
+            if (romChecksumsAndModels[i].checksum == actualChecksum)
+            {
+                finalMessage += QString("\n\nThis appears to be a standard Macintosh %1 ROM image.").arg(romChecksumsAndModels[i].model);
+                break;
+            }
+        }
+
+        showMessageBox(QMessageBox::Information, "Checksum matches", finalMessage);
+    }
+    else
+    {
+        // This *might* not be an error. The ROM might be patched.
+        if (identifyBaseROM(&bufferBytes) != BaseROMUnknown)
+        {
+            QString finalMessage = QString("The checksum in this ROM does not match. However, it appears to be a patched ROM, so it's normal for the checksum to not match.\n\nAccording to the ROM header, it is a %1 ROM.")
+                    .arg(displayableFileSize(romLength));
+
+            // It's been hacked. So don't treat it as an error
+            showMessageBox(QMessageBox::Information, "Checksum doesn't match", finalMessage);
+        }
+        else
+        {
+            QString checksumInROMString = QString("%1").arg(checksumInROM, 8, 16, QChar('0')).toUpper();
+            QString actualChecksumString = QString("%1").arg(actualChecksum, 8, 16, QChar('0')).toUpper();
+            QString finalMessage = QString("The checksum in this ROM does not match. The header says the checksum is %1, but the checksum is actually %2.\n\nAccording to the ROM header, it is a %3 ROM.\n\nThis might not actually be a problem if this is a programmable ROM SIMM and the ROM has been intentionally patched.")
+                    .arg(checksumInROMString)
+                    .arg(actualChecksumString)
+                    .arg(displayableFileSize(romLength));
+            showMessageBox(QMessageBox::Warning, "Checksum doesn't match", finalMessage);
+        }
+    }
+}
+
+bool MainWindow::calculateROMChecksum(const QByteArray &rom, uint32_t len, uint32_t &checksum)
+{
+    if (static_cast<uint32_t>(rom.length()) < len)
+    {
+        return false;
+    }
+
+    // Now calculate the checksum
+    checksum = 0;
+    for (uint32_t i = 4; i < len; i += 2)
+    {
+        uint16_t thisWord = 0;
+        thisWord |= static_cast<uint8_t>(rom.at(i + 0)) << 8;
+        thisWord |= static_cast<uint8_t>(rom.at(i + 1)) << 0;
+        checksum += thisWord;
+    }
+
+    return true;
+}
+
 void MainWindow::returnToControlPage()
 {
     // Depending on what we were doing, return to the correct page
@@ -1516,5 +2095,839 @@ void MainWindow::returnToControlPage()
     else
     {
         ui->pages->setCurrentWidget(ui->controlPage);
+    }
+
+    ui->actionUpdate_firmware->setEnabled(true);
+    ui->actionCheck_Firmware_Version->setEnabled(true);
+}
+
+void MainWindow::on_selectBaseROMButton_clicked()
+{
+    QString filename = QFileDialog::getOpenFileName(this, "Select a base ROM image:");
+    if (!filename.isNull())
+    {
+        ui->chosenBaseROMFile->setText(filename);
+        updateCreateROMControlStatus();
+    }
+}
+
+
+void MainWindow::on_selectDiskImageButton_clicked()
+{
+    QString filename = QFileDialog::getOpenFileName(this, "Select a disk image to add to the ROM:");\
+    if (!filename.isNull())
+    {
+        ui->chosenDiskImageFile->setText(filename);
+        updateCreateROMControlStatus();
+    }
+}
+
+
+void MainWindow::on_chosenBaseROMFile_textEdited(const QString &text)
+{
+    Q_UNUSED(text);
+    updateCreateROMControlStatus();
+}
+
+
+void MainWindow::on_chosenDiskImageFile_textEdited(const QString &text)
+{
+    Q_UNUSED(text);
+    updateCreateROMControlStatus();
+}
+
+void MainWindow::updateCreateROMControlStatus()
+{
+    QString baseROMError;
+    QString diskImageError;
+    bool baseROMValid = checkBaseROMValidity(baseROMError);
+    bool alreadyCompressed = false;
+    bool diskImageValid = checkDiskImageValidity(diskImageError, alreadyCompressed);
+    bool error = true;
+
+    ui->writeCombinedFileToSIMMButton->setEnabled(baseROMValid && diskImageValid);
+    ui->saveCombinedFileButton->setEnabled(baseROMValid && diskImageValid);
+
+    if (!baseROMValid && !baseROMError.isEmpty())
+    {
+        ui->createROMErrorText->setText(baseROMError);
+    }
+    else if (!diskImageValid && !diskImageError.isEmpty())
+    {
+        ui->createROMErrorText->setText(diskImageError);
+    }
+    else if (baseROMValid && diskImageValid)
+    {
+        QByteArray uncompressedImage = uncompressedDiskImage();
+        bool supportsCompression = checkBaseROMCompressionSupport();
+        bool shouldCompress = supportsCompression && !alreadyCompressed;
+        error = false;
+        if (shouldCompress &&
+            !FC8Compressor::hashMatchesFile(compressedImageFileHash, uncompressedImage))
+        {
+            ui->createROMErrorText->setText("Compressing...");
+
+            // Run the compression in the background. When it completes, this will re-run.
+            compressImageInBackground(uncompressedImage, false);
+
+            // While it's compressing, we can't allow writing/saving
+            ui->writeCombinedFileToSIMMButton->setEnabled(false);
+            ui->saveCombinedFileButton->setEnabled(false);
+        }
+        else if (!supportsCompression && alreadyCompressed)
+        {
+            // If they choose a compressed disk image and a ROM that doesn't support compression,
+            // detect that edge case
+            ui->createROMErrorText->setText("ROM doesn't support compression, but disk image is compressed");
+            error = true;
+            ui->writeCombinedFileToSIMMButton->setEnabled(false);
+            ui->saveCombinedFileButton->setEnabled(false);
+        }
+        else if (identifyBaseROM() == BaseROMbbraun2MB && uncompressedImage.length() > 1572864)
+        {
+            ui->createROMErrorText->setText("This base ROM only supports disk images " + QLocale(QLocale::English).toString(1572864) + " bytes or less in size.");
+            error = true;
+            ui->writeCombinedFileToSIMMButton->setEnabled(false);
+            ui->saveCombinedFileButton->setEnabled(false);
+        }
+        else
+        {
+            QFileInfo baseRom(ui->chosenBaseROMFile->text());
+            qint64 size = baseRom.size();
+
+            if (shouldCompress)
+            {
+                size += compressedImage.length();
+            }
+            else
+            {
+                size += uncompressedImage.length();
+            }
+
+            QString prettySize = displayableFileSize(size);
+            if (shouldCompress || alreadyCompressed)
+            {
+                prettySize += " (FC8-compressed)";
+            }
+
+            const qint64 simmSize = simmTable[ui->simmCapacityBox->currentIndex()].size * 1024;
+            if (size > simmSize)
+            {
+                // If the image is too big, it's an error
+                error = true;
+                ui->writeCombinedFileToSIMMButton->setEnabled(false);
+                ui->saveCombinedFileButton->setEnabled(false);
+
+                // Mark just how much too big it is.
+                prettySize += ". Disk image is too large by " + QLocale(QLocale::English).toString(size - simmSize) + " bytes.";
+            }
+            else
+            {
+                prettySize += ". " + QLocale(QLocale::English).toString(simmSize - size) + " bytes of space remain.";
+            }
+
+            ui->createROMErrorText->setText("Total ROM Size: " + prettySize);
+        }
+    }
+    else
+    {
+        // Something's not valid, but it's not a critical error.
+        // Typically means both files haven't been chosen yet.
+        ui->createROMErrorText->setText("");
+        error = false;
+    }
+
+    // Show errors in red
+    if (error)
+    {
+        ui->createROMErrorText->setStyleSheet("color: red;");
+    }
+    else
+    {
+        ui->createROMErrorText->setStyleSheet("");
+    }
+}
+
+bool MainWindow::checkBaseROMValidity(QString &errorText)
+{
+    const QString baseROMFileName = ui->chosenBaseROMFile->text();
+    QFileInfo fi(baseROMFileName);
+    if (baseROMFileName.isEmpty() || !fi.exists() || !fi.isFile())
+    {
+        errorText = "";
+        return false;
+    }
+
+    // Check to make sure it's actually a ROM file that has disk image capabilities.
+    // Easiest way to do this is look for the hack near 0x1700.
+    if (fi.size() != 512*1024)
+    {
+        errorText = "The selected base ROM is not exactly 512 KB in size.";
+        return false;
+    }
+
+    QFile f(baseROMFileName);
+    if (!f.open(QFile::ReadOnly))
+    {
+        errorText = "Unable to open the base ROM.";
+        return false;
+    }
+
+    QByteArray romData = f.read(0x1708);
+    f.close();
+
+    if (romData.length() != 0x1708)
+    {
+        errorText = "Unable to read from base ROM.";
+        return false;
+    }
+
+    if (romData.at(0x1706) == 0x4E && romData.at(0x1707) == 0x75)
+    {
+        // If there's an RTS here, it's probably a ROM image, but it hasn't
+        // been hacked to add the ROM disk driver.
+        errorText = "The chosen base ROM isn't compatible with ROM disks.";
+        return false;
+    }
+    else if (romData.at(0x1706) != 0x67)
+    {
+        // If there isn't a BEQ instruction here, it's likely not a ROM image,
+        // hacked or otherwise.
+        errorText = "The chosen base ROM doesn't appear to be a Mac ROM image.";
+        return false;
+    }
+
+    // Basic sanity check is now done. Theres's a BEQ instruction where we would
+    // expect to find it in a ROM that has ROM disk support.
+    return true;
+}
+
+bool MainWindow::checkBaseROMCompressionSupport()
+{
+    // This string shows up in custom ROMs that support compression
+    return unpatchedBaseROM().contains(" block-compressed disk image");
+}
+
+MainWindow::KnownBaseROM MainWindow::identifyBaseROM(QByteArray const *baseROMToCheck)
+{
+    QByteArray baseROM = !baseROMToCheck ? unpatchedBaseROM() : *baseROMToCheck;
+    if (baseROM.length() < 0x51DC4)
+    {
+        return BaseROMUnknown;
+    }
+
+    if (baseROM.contains("Garrett's Workshop ROM Disk"))
+    {
+        return BaseROMGarrettsWorkshop;
+    }
+    else if (baseROM.contains(" block-compressed disk image"))
+    {
+        return BaseROMBMOW;
+    }
+    // Look for a known byte pattern in bbraun's ROM disk driver
+    else if (baseROM.at(0x51DC0) == static_cast<char>(0x4E) &&
+             baseROM.at(0x51DC1) == static_cast<char>(0xBA) &&
+             baseROM.at(0x51DC2) == static_cast<char>(0x04) &&
+             baseROM.at(0x51DC3) == static_cast<char>(0xDC))
+    {
+        return BaseROMbbraun8MB;
+    }
+    // The pattern is slightly different in the 2 MB version
+    else if (baseROM.at(0x51DC0) == static_cast<char>(0x4E) &&
+             baseROM.at(0x51DC1) == static_cast<char>(0xBA) &&
+             baseROM.at(0x51DC2) == static_cast<char>(0x03) &&
+             baseROM.at(0x51DC3) == static_cast<char>(0x02))
+    {
+        return BaseROMbbraun2MB;
+    }
+
+    return BaseROMUnknown;
+}
+
+bool MainWindow::checkDiskImageValidity(QString &errorText, bool &alreadyCompressed)
+{
+    alreadyCompressed = false;
+
+    const QString diskImageFileName = ui->chosenDiskImageFile->text();
+    QFileInfo fi(diskImageFileName);
+    if (diskImageFileName.isEmpty() || !fi.exists() || !fi.isFile())
+    {
+        errorText = "";
+        return false;
+    }
+
+    // For now, validate disk images by ensuring they begin with boot blocks "LK"
+    // as well as an HFS disk image afterward "BD"
+    if (fi.size() < 1026)
+    {
+        errorText = "The selected disk image is too small to be a disk image.";
+        return false;
+    }
+
+    QFile f(diskImageFileName);
+    if (!f.open(QFile::ReadOnly))
+    {
+        errorText = "Unable to open the disk image.";
+        return false;
+    }
+
+    QByteArray diskImageData = f.read(1026);
+    f.close();
+
+    if (diskImageData.length() != 1026)
+    {
+        errorText = "Unable to read from disk image.";
+        return false;
+    }
+
+    // This image is already compressed (FC8 block mode or whole mode)
+    if (isCompressedDiskImage(diskImageData))
+    {
+        alreadyCompressed = true;
+        // Assume compressed images are usable. We don't want to decompress
+        // just to find out. Not worth the effort.
+        return true;
+    }
+
+    if (diskImageData.at(1024) != 'B' || diskImageData.at(1025) != 'D')
+    {
+        errorText = "The chosen disk image is not an HFS disk image.";
+        return false;
+    }
+
+    if (diskImageData.at(0) != 'L' || diskImageData.at(1) != 'K')
+    {
+        errorText = "The chosen disk image doesn't have boot blocks.";
+        return false;
+    }
+
+    return true;
+}
+
+bool MainWindow::isCompressedDiskImage(const QByteArray &image)
+{
+    // Look for start of FC8b or FC8_
+    return image.length() >= 4 && image.at(0) == 'F' &&
+        image.at(1) == 'C' && image.at(2) == '8' &&
+        (image.at(3) == 'b' || image.at(3) == '_');
+}
+
+void MainWindow::compressImageInBackground(QByteArray uncompressedImage, bool blockUntilCompletion)
+{
+    // Set up a thread to do the compression in the background. It can take a few seconds.
+    QThread *compressionThread = new QThread();
+    FC8Compressor *compressor = new FC8Compressor(uncompressedImage, 65536);
+    compressor->moveToThread(compressionThread);
+    // When the compression finishes, save it in this object. Just doing this to make use of
+    // cross-thread signal functionality.
+    connect(compressor, SIGNAL(compressionFinished(QByteArray,QByteArray)), this, SLOT(compressorThreadFinished(QByteArray,QByteArray)));
+    // When the compression finishes, delete the compressor
+    connect(compressor, SIGNAL(compressionFinished(QByteArray,QByteArray)), compressor, SLOT(deleteLater()));
+    // When the compressor is destroyed, stop the thread
+    connect(compressor, SIGNAL(destroyed()), compressionThread, SLOT(quit()));
+    // When the thread starts, start the compressor
+    connect(compressionThread, SIGNAL(started()), compressor, SLOT(doCompression()));
+    // When the thread stops, it should destroy itself
+    connect(compressionThread, SIGNAL(finished()), compressionThread, SLOT(deleteLater()));
+
+    compressionThread->start();
+
+    if (blockUntilCompletion)
+    {
+        QWidget *prevPage = ui->pages->currentWidget();
+        ui->progressBar->setRange(0, 0);
+        ui->statusLabel->setText("Compressing disk image...");
+        ui->pages->setCurrentWidget(ui->statusPage);
+
+        // Block until the compression is complete, showing a progress bar
+        while (!compressionThread->isFinished() ||
+               !FC8Compressor::hashMatchesFile(compressedImageFileHash, uncompressedImage))
+        {
+            qApp->processEvents();
+        }
+
+        // Restore the page we were on before
+        ui->pages->setCurrentWidget(prevPage);
+    }
+}
+
+QByteArray MainWindow::uncompressedDiskImage()
+{
+    const QString diskImageFileName = ui->chosenDiskImageFile->text();
+    QFile f(diskImageFileName);
+    if (!f.open(QFile::ReadOnly))
+    {
+        return QByteArray();
+    }
+    QByteArray data = f.readAll();
+    f.close();
+
+    return data;
+}
+
+QByteArray MainWindow::diskImageToWrite()
+{
+    QByteArray uncompressedImage = uncompressedDiskImage();
+
+    // If the selected ROM doesn't support compression, return it uncompressed.
+    // Also, if it's a compressed disk image, return it as is (earlier checks
+    // will have already ensured we are using a supported ROM in that case)
+    if (!checkBaseROMCompressionSupport() || isCompressedDiskImage(uncompressedImage))
+    {
+        return uncompressedImage;
+    }
+
+    // Otherwise, return the compressed image which we should have already
+    // verified is good to go. Double check though...it's possible that the file
+    // changed underneath us, in which case we need to compress it again.
+    if (FC8Compressor::hashMatchesFile(compressedImageFileHash, uncompressedImage))
+    {
+        return compressedImage;
+    }
+    else
+    {
+        // It doesn't match, which means the filename hasn't changed but the
+        // content has changed since we last compressed it. Recompress it.
+        compressImageInBackground(uncompressedImage, true);
+
+        // Make sure it matches now
+        if (FC8Compressor::hashMatchesFile(compressedImageFileHash, uncompressedImage))
+        {
+            return compressedImage;
+        }
+        else
+        {
+            // Somehow we failed to recompress it; cause an error to be returned.
+            // Should never happen; just for safeguarding.
+            return QByteArray();
+        }
+    }
+}
+
+QByteArray MainWindow::unpatchedBaseROM()
+{
+    QByteArray finalImage;
+    QFile f(ui->chosenBaseROMFile->text());
+    if (!f.open(QFile::ReadOnly))
+    {
+        return QByteArray();
+    }
+    finalImage = f.readAll();
+    f.close();
+    return finalImage;
+}
+
+QByteArray MainWindow::patchedBaseROM()
+{
+    QByteArray rom = unpatchedBaseROM();
+    uint32_t imageSize = uncompressedDiskImage().length();
+
+    // If we find a base ROM that we know how to modify for the correct disk image size,
+    // perform the modification here.
+    switch (identifyBaseROM())
+    {
+    case BaseROMbbraun8MB:
+        rom[0x52500] = (imageSize >> 24) & 0xFF;
+        rom[0x52501] = (imageSize >> 16) & 0xFF;
+        rom[0x52502] = (imageSize >> 8) & 0xFF;
+        rom[0x52503] = (imageSize >> 0) & 0xFF;
+
+        // bbraun's 8 MB 0.9.6 base image has a bug that can cause a bus error when booting with R+A
+        // if a write is attempted before the ROM disk has been copied to RAM. Work around this
+        // bug if the driver exactly matches the known broken driver. The fix is, when deciding if
+        // a write operation is allowed or not, to look at origdisk instead of drvsts.writeProt.
+        // writeProt can say the drive is writable even though it hasn't been copied to RAM yet.
+        // When origdisk is non-null, we're guaranteed it's in RAM, so it's a safer check.
+        if (QCryptographicHash::hash(rom.mid(0x51D40, 0x7BC), QCryptographicHash::Md5) ==
+            QByteArray("\x0E\x12\x43\x36\x03\x48\x5C\xDE\x2E\x4C\x04\xE3\x30\xF9\xD2\x0B", 16))
+        {
+            // Change opcode from tst.b to tst.l
+            rom[0x521F1] = 0xAA;
+            // Change tested data from drvsts.writeProt to origdisk
+            rom[0x521F3] = 0x22;
+            // Change bne to beq
+            rom[0x521F4] = 0x67;
+        }
+        break;
+    case BaseROMGarrettsWorkshop:
+        rom[0x51DAC] = (imageSize >> 24) & 0xFF;
+        rom[0x51DAD] = (imageSize >> 16) & 0xFF;
+        rom[0x51DAE] = (imageSize >> 8) & 0xFF;
+        rom[0x51DAF] = (imageSize >> 0) & 0xFF;
+        break;
+    case BaseROMUnknown:
+    case BaseROMbbraun2MB:
+    case BaseROMBMOW:
+    default:
+        break;
+    }
+
+    return rom;
+}
+
+QByteArray MainWindow::createROM()
+{
+    QByteArray finalImage;
+    QByteArray baseROM = patchedBaseROM();
+    if (baseROM.isEmpty())
+    {
+        return QByteArray();
+    }
+
+    finalImage = baseROM;
+
+    QByteArray diskImage = diskImageToWrite();
+    if (diskImage.isEmpty())
+    {
+        return QByteArray();
+    }
+    finalImage += diskImage;
+
+    return finalImage;
+}
+
+QString MainWindow::displayableFileSize(qint64 size)
+{
+    if (size < 1048576)
+    {
+        if (size % 1024 == 0)
+        {
+            return QString("%1 KB").arg(size / 1024);
+        }
+        else
+        {
+            float sizeF = static_cast<float>(size) / 1024.0f;
+            return QString("%1 KB").arg(sizeF, 0, 'f', 1);
+        }
+    }
+    else
+    {
+        if (size % 1048576 == 0)
+        {
+            return QString("%1 MB").arg(size / 1048576);
+        }
+        else
+        {
+            float sizeF = static_cast<float>(size) / 1048576.0f;
+            return QString("%1 MB").arg(sizeF, 0, 'f', 1);
+        }
+    }
+}
+
+void MainWindow::on_writeCombinedFileToSIMMButton_clicked()
+{
+    QByteArray dataToWrite = createROM();
+    if (dataToWrite.isEmpty())
+    {
+        showMessageBox(QMessageBox::Warning, "Error combining files", "The ROM and disk image were unable to be combined. Make sure you chose the correct files.");
+        return;
+    }
+
+    QBuffer *combinedFile = new QBuffer();
+    combinedFile->setData(dataToWrite);
+    doInternalWrite(combinedFile);
+}
+
+void MainWindow::on_saveCombinedFileButton_clicked()
+{
+    QByteArray dataToWrite = createROM();
+    if (dataToWrite.isEmpty())
+    {
+        showMessageBox(QMessageBox::Warning, "Error combining files", "The ROM and disk image were unable to be combined. Make sure you chose the correct files.");
+        return;
+    }
+
+    QString filename = QFileDialog::getSaveFileName(this, "Save combined ROM and disk image as:");
+    if (!filename.isNull())
+    {
+        QFile f(filename);
+        if (!f.open(QFile::WriteOnly))
+        {
+            showMessageBox(QMessageBox::Warning, "Error opening output file", "Unable to open file for writing. Make sure you have correct file permissions.");
+            return;
+        }
+
+        bool success = f.write(dataToWrite) == dataToWrite.length();
+        f.close();
+
+        if (success)
+        {
+            showMessageBox(QMessageBox::Information, "Save complete", "The combined ROM image was saved successfully.");
+        }
+        else
+        {
+            showMessageBox(QMessageBox::Warning, "Error writing output file", "Unable to save combined ROM image.");
+        }
+    }
+}
+
+void MainWindow::compressorThreadFinished(QByteArray hashOfOriginal, QByteArray compressedData)
+{
+    compressedImageFileHash = hashOfOriginal;
+    compressedImage = compressedData;
+    updateCreateROMControlStatus();
+}
+
+QList<QByteArray> MainWindow::separateFirmwareIntoVersions(QByteArray totalFirmware)
+{
+    QList<QByteArray> firmwares;
+
+    while (totalFirmware.contains(multiFirmwareDelimiter))
+    {
+        int index = totalFirmware.indexOf(multiFirmwareDelimiter);
+        firmwares.append(totalFirmware.mid(0, index));
+        totalFirmware.remove(0, index + multiFirmwareDelimiter.length());
+    }
+
+    // As long as we have something left, also append it
+    if (!totalFirmware.isEmpty())
+    {
+        firmwares.append(totalFirmware);
+    }
+
+    return firmwares;
+}
+
+QByteArray MainWindow::findCompatibleFirmware(QString filename, QString &compatibilityError)
+{
+    QFile fwFile(filename);
+    if (!fwFile.open(QFile::ReadOnly))
+    {
+        compatibilityError = "Unable to open the selected firmware file.";
+        return QByteArray();
+    }
+
+    QByteArray totalFirmware = fwFile.readAll();
+    fwFile.close();
+
+    // Extract all different firmwares from this
+    QList<QByteArray> firmwares = separateFirmwareIntoVersions(totalFirmware);
+
+    // Make sure they are each firmware files, and try to find the first one that is compatible
+    int firmwaresFound = 0;
+    foreach (QByteArray const &firmware, firmwares)
+    {
+        bool isFirmwareFile = false;
+        if (firmwareIsCompatible(firmware, isFirmwareFile))
+        {
+            return firmware;
+        }
+
+        if (isFirmwareFile)
+        {
+            firmwaresFound++;
+        }
+    }
+
+    if (firmwaresFound == 0)
+    {
+        compatibilityError = "The selected file doesn't appear to be a programmer firmware file.";
+    }
+    else
+    {
+        compatibilityError = "The selected file is a SIMM programmer firmware file, "
+                             "but it isn't compatible with your programmer.\n\n"
+                             "Please download the correct firmware file from: "
+                             "https://github.com/dougg3/mac-rom-simm-programmer/releases";
+    }
+
+    return QByteArray();
+}
+
+bool MainWindow::firmwareIsCompatible(QByteArray const &firmware, bool &isFirmwareFile)
+{
+    // Find the device descriptor in the dump. Locate it by
+    // searching for the USB VID and PID, and then double-checking
+    // that it's actually a device descriptor by verifying the surrounding data.
+    QByteArray vidPid("\xD0\x16\xAA\x06", 4);
+    int index = 0;
+    int descriptorsFound = 0;
+    do
+    {
+        index = firmware.indexOf(vidPid, index);
+        if (index >= 0)
+        {
+            // Is this actually the device descriptor? Check a bunch of fields to see.
+            // The descriptors are slightly different between revisions, but this will
+            // check enough of the fields that we can be confident.
+            if (index >= 8 &&
+                index + 9 < firmware.length() &&
+                firmware.at(index - 8) == 0x12 && // Device descriptor length
+                firmware.at(index - 7) == 0x01 && // Device descriptor identifier
+                firmware.at(index - 4) == 0x02 && // Class = CDC communication device
+                firmware.at(index - 3) == 0x00 && // Subclass = 0
+                firmware.at(index - 2) == 0x00 && // Protocol = 0)
+                firmware.at(index + 6) == 0x01 && // Manufacturer string = 1
+                firmware.at(index + 7) == 0x02 && // Product string = 2
+                firmware.at(index + 9) == 0x01) // Num configurations = 1
+            {
+                // We're pretty sure it is. Let's extract the revision.
+                uint16_t revision = static_cast<uint8_t>(firmware.at(index + 4)) |
+                                    static_cast<uint8_t>(firmware.at(index + 5)) << 8;
+
+                // See if it matches the current programmer revision. Alternatively,
+                // if the current programmer revision is 0 it means we failed to detect it,
+                // and we should just let them attempt it anyway.
+                if (revision == p->programmerRevision() ||
+                    p->programmerRevision() == ProgrammerRevisionUnknown)
+                {
+                    isFirmwareFile = true;
+                    return true;
+                }
+
+                // Count how many descriptors we found
+                descriptorsFound++;
+            }
+
+            index += 4;
+        }
+    } while (index >= 0);
+
+    isFirmwareFile = (descriptorsFound > 0);
+    return false;
+}
+
+void MainWindow::showMessageBox(QMessageBox::Icon icon, const QString &title, const QString &text)
+{
+    // We can't show multiple message boxes
+    if (activeMessageBox) { return; }
+
+    // Show the message box as a modal dialog, connect so we get notified when they click OK
+    activeMessageBox = new QMessageBox(icon, title, text, QMessageBox::Ok, this);
+    connect(activeMessageBox, SIGNAL(finished(int)), this, SLOT(messageBoxFinished()));
+    activeMessageBox->setModal(true);
+    activeMessageBox->open();
+}
+
+void MainWindow::messageBoxFinished()
+{
+    if (activeMessageBox)
+    {
+        activeMessageBox->deleteLater();
+        activeMessageBox = NULL;
+    }
+}
+
+void MainWindow::on_actionExtended_UI_triggered(bool checked)
+{
+    setUseExtendedUI(checked);
+}
+
+void MainWindow::setUseExtendedUI(bool extended)
+{
+    const bool alreadyExtended = ui->tabWidget->isHidden();
+    if (extended == alreadyExtended) { return; }
+
+    if (extended)
+    {
+        // Put everything on one page
+        ui->controlLayout->insertWidget(1, ui->createROMGroupBox);
+        ui->controlLayout->insertWidget(2, ui->writeGroupBox);
+        ui->controlLayout->insertWidget(3, ui->readGroupBox);
+        ui->writeGroupBox->setTitle(ui->tabWidget->tabText(0));
+        ui->createROMGroupBox->setTitle(ui->tabWidget->tabText(1));
+        ui->readGroupBox->setTitle(ui->tabWidget->tabText(2));
+        ui->tabWidget->hide();
+        ui->createVerifyBox->hide();
+        ui->createHowMuchToWriteBox->hide();
+    }
+    else
+    {
+        // Restore widgets to the original layout in the UI file
+        ui->createTabLayout->insertWidget(0, ui->createROMGroupBox);
+        ui->writeTabLayout->insertWidget(0, ui->writeGroupBox);
+        ui->readTabLayout->insertWidget(0, ui->readGroupBox);
+        ui->writeGroupBox->setTitle("");
+        ui->createROMGroupBox->setTitle("");
+        ui->readGroupBox->setTitle("");
+        ui->tabWidget->show();
+        ui->createVerifyBox->show();
+        ui->createHowMuchToWriteBox->show();
+    }
+
+    if (!initializing)
+    {
+        QSettings settings;
+        settings.setValue(extendedViewKey, extended);
+    }
+}
+
+void MainWindow::on_actionCreate_blank_disk_image_triggered()
+{
+    CreateBlankDiskDialog dialog;
+    int result = dialog.exec();
+    if (result == QDialog::Accepted)
+    {
+        QString filename = QFileDialog::getSaveFileName(this, "Save blank disk image as:", QString(), "Disk images (*.dsk)");
+        if (!filename.isEmpty())
+        {
+            QFile outFile(filename);
+            if (outFile.open(QFile::WriteOnly))
+            {
+                QByteArray be(dialog.selectedDiskSize(), static_cast<char>(0));
+                bool success = outFile.write(be) == be.length();
+                outFile.close();
+
+                if (success)
+                {
+                    QMessageBox::information(this, "Disk image created", "Successfully created a blank disk image.");
+                }
+                else
+                {
+                    QMessageBox::warning(this, "File write error", "Unable to write to the blank disk image file.");
+                }
+            }
+            else
+            {
+                QMessageBox::warning(this, "File save error", "Unable to open the blank disk image file for writing.");
+            }
+        }
+    }
+}
+
+void MainWindow::on_actionCheck_Firmware_Version_triggered()
+{
+    resetAndShowStatusPage();
+    p->requestFirmwareVersion();
+}
+
+void MainWindow::programmerFirmwareVersionStatusChanged(ReadFirmwareVersionStatus status, uint32_t version)
+{
+    returnToControlPage();
+
+    switch (status)
+    {
+    case ReadFirmwareVersionSucceeded: {
+        const uint8_t major = (version >> 24) & 0xFF;
+        const uint8_t minor = (version >> 16) & 0xFF;
+        const uint8_t revision = (version >> 8) & 0xFF;
+        const uint8_t extra = (version >> 0) & 0xFF;
+        QString extraString = "";
+        if (extra != 0)
+        {
+            if (extra == 1)
+            {
+                extraString = " prerelease";
+            }
+            else
+            {
+                extraString = " (unknown special version)";
+            }
+        }
+        showMessageBox(QMessageBox::Information, "Firmware check complete", QString("This programmer is running firmware version %1.%2.%3%4.")
+                       .arg(major)
+                       .arg(minor)
+                       .arg(revision)
+                       .arg(extraString));
+        break;
+    }
+    case ReadFirmwareVersionCommandNotSupported:
+        showMessageBox(QMessageBox::Information, "Firmware check complete", "This programmer's firmware is out of date. You should install the latest firmware from:\n\n"
+                        "https://github.com/dougg3/mac-rom-simm-programmer/releases");
+        break;
+    case ReadFirmwareVersionError:
+    default:
+        showMessageBox(QMessageBox::Warning, "Error checking firmware version", "Unable to determine the firmware version.");
+        break;
     }
 }
