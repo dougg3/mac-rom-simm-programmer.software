@@ -1157,6 +1157,7 @@ void Programmer::handleChar(uint8_t c)
             qDebug() << "We're in the bootloader, so sending an \"enter programmer\" request.";
             emit startStatusChanged(ProgrammerInitializing);
             sendByte(EnterProgrammer);
+            serialPort->flush();
             closePort();
 
             // Now wait for it to reconnect
@@ -1201,6 +1202,7 @@ void Programmer::handleChar(uint8_t c)
             qDebug() << "We're in the programmer, so sending an \"enter bootloader\" request.";
             emit startStatusChanged(ProgrammerInitializing);
             sendByte(EnterBootloader);
+            serialPort->flush();
             closePort();
 
             // Now wait for it to reconnect
