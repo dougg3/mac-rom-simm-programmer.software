@@ -42,6 +42,16 @@ CreateBlankDiskDialog::CreateBlankDiskDialog(QWidget *parent) :
     ui->sizeBox->addItem("3.5 MB (for 4 MB SIMM, uncompressed)", 3670016);
     ui->sizeBox->addItem("7.5 MB (for 8 MB SIMM, uncompressed)", 7864320);
 
+    // And finally, for Quadra SIMMs:
+    ui->sizeBox->addItem("Uncompressed, for 1 MB Quadra ROMs:");
+    if (!setComboBoxItemEnabled(ui->sizeBox->count() - 1, false))
+    {
+        ui->sizeBox->removeItem(ui->sizeBox->count() - 1);
+    }
+    ui->sizeBox->addItem("1.0 MB (for 2 MB SIMM with Quadra ROM)", 1048576);
+    ui->sizeBox->addItem("3.0 MB (for 4 MB SIMM with Quadra ROM)", 3145728);
+    ui->sizeBox->addItem("7.0 MB (for 8 MB SIMM with Quadra ROM)", 7340032);
+
     // Finally, a section for custom items
     ui->sizeBox->addItem("Custom:");
     if (!setComboBoxItemEnabled(ui->sizeBox->count() - 1, false))
