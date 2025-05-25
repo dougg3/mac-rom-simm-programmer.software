@@ -147,6 +147,7 @@ private:
         BaseROMbbraun8MB,
         BaseROMBMOW,
         BaseROMGarrettsWorkshop,
+        BaseROMbbraunInQuadra,
     };
 
     void resetAndShowStatusPage();
@@ -160,6 +161,7 @@ private:
     bool checkBaseROMValidity(QString &errorText);
     bool checkBaseROMCompressionSupport();
     KnownBaseROM identifyBaseROM(QByteArray const *baseROMToCheck = NULL);
+    int offsetToQuadraROMDiskSize(QByteArray const &baseROM);
     bool checkDiskImageValidity(QString &errorText, bool &alreadyCompressed);
     bool isCompressedDiskImage(QByteArray const &image);
     void compressImageInBackground(QByteArray uncompressedImage, bool blockUntilCompletion);

@@ -2258,14 +2258,14 @@ bool MainWindow::checkBaseROMValidity(QString &errorText)
         return false;
     }
 
-    // Check to make sure it's actually a ROM file that has disk image capabilities.
-    // Easiest way to do this is look for the hack near 0x1700.
-    if (fi.size() != 512*1024)
+    // Make sure the file is big enough to actually be a base ROM.
+    if (fi.size() < 512*1024)
     {
-        errorText = "The selected base ROM is not exactly 512 KB in size.";
+        errorText = "The selected base ROM is not large enough.";
         return false;
     }
 
+    // Load the entire base ROM
     QFile f(baseROMFileName);
     if (!f.open(QFile::ReadOnly))
     {
@@ -2273,15 +2273,66 @@ bool MainWindow::checkBaseROMValidity(QString &errorText)
         return false;
     }
 
-    QByteArray romData = f.read(0x1708);
+    QByteArray romData = f.readAll();
     f.close();
 
-    if (romData.length() != 0x1708)
+    // Make sure we read it all
+    if (fi.size() != romData.length())
     {
         errorText = "Unable to read from base ROM.";
         return false;
     }
 
+    // ROM versions up to 0x78 don't have the ROM length embedded.
+    // It's unclear whether ROM 0x79 has the ROM length embedded or not.
+    const uint8_t romVersion = static_cast<uint8_t>(romData.at(0x09));
+    if (romVersion < 0x7A)
+    {
+        // If we find a really old ROM, just assume it's too old.
+        errorText = "The chosen base ROM isn't compatible with ROM disks.";
+        return false;
+    }
+
+    // Pull out the length from the rom image and make sure it's valid
+    uint32_t romLength = 0;
+    romLength |= static_cast<uint8_t>(romData.at(0x40)) << 24;
+    romLength |= static_cast<uint8_t>(romData.at(0x41)) << 16;
+    romLength |= static_cast<uint8_t>(romData.at(0x42)) << 8;
+    romLength |= static_cast<uint8_t>(romData.at(0x43)) << 0;
+    if (romLength > 4 * 1048576 || romLength % (64*1024) ||
+        static_cast<int>(romLength) > romData.length())
+    {
+        // If the length doesn't make sense, bail
+        errorText = "The chosen base ROM doesn't appear to be a valid ROM.";
+        return false;
+    }
+
+    // Make sure it doesn't have a ROM image appended to it yet
+    if (romData.length() > static_cast<int>(romLength))
+    {
+        bool foundDiskImage = false;
+
+        QByteArray extraData = romData.mid(romLength);
+        if (isCompressedDiskImage(extraData))
+        {
+            foundDiskImage = true;
+        }
+        else if (extraData.length() >= 1026 &&
+                 extraData.at(0) == 'L' && extraData.at(1) == 'K' &&
+                 extraData.at(1024) == 'B' && extraData.at(1025) == 'D')
+        {
+            foundDiskImage = true;
+        }
+
+        if (foundDiskImage)
+        {
+            errorText = "The chosen base ROM already has a ROM disk appended.";
+            return false;
+        }
+    }
+
+    // Check to make sure it's actually a ROM file that has disk image capabilities.
+    // Easiest way to do this is look for the hack near 0x1700.
     if (romData.at(0x1706) == 0x4E && romData.at(0x1707) == 0x75)
     {
         // If there's an RTS here, it's probably a ROM image, but it hasn't
@@ -2324,6 +2375,11 @@ MainWindow::KnownBaseROM MainWindow::identifyBaseROM(QByteArray const *baseROMTo
     {
         return BaseROMBMOW;
     }
+    // Look for a known pattern in bbraun's ROM disk driver when inserted into a Quadra ROM
+    else if (offsetToQuadraROMDiskSize(baseROM) >= 0)
+    {
+        return BaseROMbbraunInQuadra;
+    }
     // Look for a known byte pattern in bbraun's ROM disk driver
     else if (baseROM.at(0x51DC0) == static_cast<char>(0x4E) &&
              baseROM.at(0x51DC1) == static_cast<char>(0xBA) &&
@@ -2342,6 +2398,25 @@ MainWindow::KnownBaseROM MainWindow::identifyBaseROM(QByteArray const *baseROMTo
     }
 
     return BaseROMUnknown;
+}
+
+int MainWindow::offsetToQuadraROMDiskSize(const QByteArray &baseROM)
+{
+    int offset = -1;
+
+    // Look for the offset of a sequence of bytes in bbraun's ROM disk driver patched by CayMac,
+    // that indicates we've found the offset where the ROM disk size should be stored in the image
+    if (baseROM.length() >= 0x100000)
+    {
+        const QByteArray quadraPattern("\x3F\xFF\xFF\xF8\x00\x00\x00\x00\x01\x08\x00\x00\x01\x0C\x40\x90\x00\x00", 18);
+        offset = baseROM.indexOf(quadraPattern);
+        if (offset >= 0)
+        {
+            offset += 18;
+        }
+    }
+
+    return offset;
 }
 
 bool MainWindow::checkDiskImageValidity(QString &errorText, bool &alreadyCompressed)
@@ -2555,6 +2630,18 @@ QByteArray MainWindow::patchedBaseROM()
         rom[0x51DAE] = (imageSize >> 8) & 0xFF;
         rom[0x51DAF] = (imageSize >> 0) & 0xFF;
         break;
+    case BaseROMbbraunInQuadra:
+    {
+        int offset = offsetToQuadraROMDiskSize(rom);
+        if (offset >= 0)
+        {
+            rom[offset + 0] = (imageSize >> 24) & 0xFF;
+            rom[offset + 1] = (imageSize >> 16) & 0xFF;
+            rom[offset + 2] = (imageSize >> 8) & 0xFF;
+            rom[offset + 3] = (imageSize >> 0) & 0xFF;
+        }
+        break;
+    }
     case BaseROMUnknown:
     case BaseROMbbraun2MB:
     case BaseROMBMOW:
