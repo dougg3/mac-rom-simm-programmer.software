@@ -58,7 +58,7 @@ lessThan(QT_MAJOR_VERSION, 5) {
 	win32:RC_ICONS = SIMMProgrammer.ico
 }
 
-VERSION = 2.0.0
+VERSION = 2.0.1
 DEFINES += VERSION_STRING=\\\"$$VERSION\\\"
 
 macx:QMAKE_INFO_PLIST = Info.plist
